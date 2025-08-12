@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'pages/auth_page.dart';
+import 'pages/profile_setup_page.dart';
+import 'pages/settings_page.dart';
 import 'services/auth_service.dart';
 
 void main() async {
@@ -46,6 +49,10 @@ class PrayerBuddyApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF5F5DC),
       ),
       home: const AuthWrapper(),
+      routes: {
+        '/home': (context) => const PrayerBuddyHomePage(),
+        '/auth': (context) => const AuthPage(),
+      },
     );
   }
 }
@@ -70,12 +77,48 @@ class AuthWrapper extends StatelessWidget {
         }
         
         if (snapshot.hasData && snapshot.data != null) {
-          // User is signed in, show main app
-          return const PrayerBuddyHomePage();
+          // User is signed in, check if they have completed profile setup
+          return ProfileCheckWrapper(user: snapshot.data!);
         }
         
         // User is not signed in, show auth page
         return const AuthPage();
+      },
+    );
+  }
+}
+
+class ProfileCheckWrapper extends StatelessWidget {
+  final User user;
+  
+  const ProfileCheckWrapper({super.key, required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            backgroundColor: Color(0xFFF5F5DC),
+            body: Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6B4EFF)),
+              ),
+            ),
+          );
+        }
+        
+        if (snapshot.hasData && snapshot.data!.exists) {
+          // User profile exists, show main app
+          return const PrayerBuddyHomePage();
+        } else {
+          // User profile doesn't exist, show profile setup
+          return ProfileSetupPage(user: user);
+        }
       },
     );
   }
@@ -173,6 +216,23 @@ class HomeFeedPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    
+    if (user == null) {
+      return const Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(
+          child: Text(
+            'Please sign in',
+            style: TextStyle(
+              fontSize: 18,
+              color: Color(0xFF8B8B7A),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
@@ -199,14 +259,72 @@ class HomeFeedPage extends StatelessWidget {
           ),
         ],
       ),
-      body: const Center(
-        child: Text(
-          'Welcome to your Christian community feed',
-          style: TextStyle(
-            fontSize: 18,
-            color: Color(0xFF8B8B7A),
-          ),
-        ),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6B4EFF)),
+              ),
+            );
+          }
+
+          String userName = 'Friend';
+          if (snapshot.hasData && snapshot.data!.exists) {
+            final userData = snapshot.data!.data() as Map<String, dynamic>?;
+            if (userData != null && userData['name'] != null) {
+              userName = userData['name'] as String;
+            }
+          }
+
+          return Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Welcome, $userName!',
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF6B4EFF),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Welcome to your Christian community feed',
+                  style: TextStyle(
+                    fontSize: 18,
+                    color: Color(0xFF8B8B7A),
+                  ),
+                ),
+                const SizedBox(height: 40),
+                const Center(
+                  child: Icon(
+                    Icons.favorite,
+                    size: 80,
+                    color: Color(0xFF6B4EFF),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Center(
+                  child: Text(
+                    'Your prayer community is here to support you',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Color(0xFF8B8B7A),
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -329,7 +447,13 @@ class ProfilePage extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.settings, color: Color(0xFF8B8B7A)),
-            onPressed: () {},
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (context) => const SettingsPage(),
+                ),
+              );
+            },
           ),
         ],
       ),

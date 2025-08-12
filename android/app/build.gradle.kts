@@ -11,7 +11,7 @@ plugins {
 android {
     namespace = "com.example.prayer_buddy"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "27.0.12077973"
+    // ndkVersion = "27.0.12077973" // Commented out due to NDK issues
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
