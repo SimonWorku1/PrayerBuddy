@@ -11,13 +11,10 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> {
-  final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
   final _phoneController = TextEditingController();
   final _smsCodeController = TextEditingController();
   final _authService = AuthService();
-  
+
   AuthMethod _selectedMethod = AuthMethod.none;
   bool _isLoading = false;
   String _errorMessage = '';
@@ -28,8 +25,6 @@ class _AuthPageState extends State<AuthPage> {
 
   @override
   void dispose() {
-    _emailController.dispose();
-    _passwordController.dispose();
     _phoneController.dispose();
     _smsCodeController.dispose();
     super.dispose();
@@ -54,9 +49,11 @@ class _AuthPageState extends State<AuthPage> {
   }
 
   void _onPhoneNumberChanged(String value) {
-    // Format the phone number as user types
     setState(() {
-      _formattedPhoneNumber = PhoneFormatter.formatPhoneNumber(value, _selectedCountry);
+      _formattedPhoneNumber = PhoneFormatter.formatPhoneNumber(
+        value,
+        _selectedCountry,
+      );
     });
   }
 
@@ -64,41 +61,12 @@ class _AuthPageState extends State<AuthPage> {
     if (newCountry != null) {
       setState(() {
         _selectedCountry = newCountry;
-        // Re-format the phone number with new country
         if (_phoneController.text.isNotEmpty) {
-          _formattedPhoneNumber = PhoneFormatter.formatPhoneNumber(_phoneController.text, _selectedCountry);
+          _formattedPhoneNumber = PhoneFormatter.formatPhoneNumber(
+            _phoneController.text,
+            _selectedCountry,
+          );
         }
-      });
-    }
-  }
-
-  Future<void> _handleEmailPasswordAuth(bool isSignUp) async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
-
-    try {
-      if (isSignUp) {
-        await _authService.createUserWithEmailAndPassword(
-          _emailController.text.trim(),
-          _passwordController.text,
-        );
-      } else {
-        await _authService.signInWithEmailAndPassword(
-          _emailController.text.trim(),
-          _passwordController.text,
-        );
-      }
-    } catch (e) {
-      setState(() {
-        _errorMessage = e.toString();
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
       });
     }
   }
@@ -119,11 +87,10 @@ class _AuthPageState extends State<AuthPage> {
       });
 
       try {
-        final userCredential = await _authService.verifyPhoneCode(_smsCodeController.text);
+        await _authService.verifyPhoneCode(_smsCodeController.text);
         // Phone verification successful - Firebase auth state will update automatically
-        // The AuthWrapper will detect the signed-in user and navigate to home screen
-        print('Phone auth successful: ${userCredential.user?.uid}');
-        
+        print('Phone auth successful');
+
         // Clear the form
         setState(() {
           _phoneCodeSent = false;
@@ -149,9 +116,13 @@ class _AuthPageState extends State<AuthPage> {
       }
 
       // Validate phone number
-      if (!PhoneFormatter.isValidPhoneNumber(_phoneController.text, _selectedCountry)) {
+      if (!PhoneFormatter.isValidPhoneNumber(
+        _phoneController.text,
+        _selectedCountry,
+      )) {
         setState(() {
-          _errorMessage = 'Please enter a valid phone number for $_selectedCountry';
+          _errorMessage =
+              'Please enter a valid phone number for $_selectedCountry';
         });
         return;
       }
@@ -163,8 +134,11 @@ class _AuthPageState extends State<AuthPage> {
 
       try {
         // Get clean phone number for Firebase
-        String cleanPhoneNumber = PhoneFormatter.getCleanPhoneNumber(_phoneController.text, _selectedCountry);
-        
+        String cleanPhoneNumber = PhoneFormatter.getCleanPhoneNumber(
+          _phoneController.text,
+          _selectedCountry,
+        );
+
         await _authService.verifyPhoneNumber(
           phoneNumber: cleanPhoneNumber,
           onCodeSent: (String verificationId) {
@@ -189,7 +163,8 @@ class _AuthPageState extends State<AuthPage> {
           },
           onCodeAutoRetrievalTimeout: (String verificationId) {
             setState(() {
-              _errorMessage = 'SMS code retrieval timed out. Please enter manually.';
+              _errorMessage =
+                  'SMS code retrieval timed out. Please enter manually.';
               _isLoading = false;
             });
           },
@@ -255,7 +230,7 @@ class _AuthPageState extends State<AuthPage> {
                   ),
                 ),
                 const SizedBox(height: 32),
-                
+
                 // Welcome Text
                 Text(
                   'Welcome to PrayerBuddy',
@@ -278,8 +253,6 @@ class _AuthPageState extends State<AuthPage> {
                   _buildMethodSelection(),
                 ] else if (_selectedMethod == AuthMethod.phone) ...[
                   _buildPhoneAuth(),
-                ] else if (_selectedMethod == AuthMethod.email) ...[
-                  _buildEmailPasswordAuth(),
                 ] else if (_selectedMethod == AuthMethod.google) ...[
                   _buildGoogleAuth(),
                 ],
@@ -307,13 +280,6 @@ class _AuthPageState extends State<AuthPage> {
       ),
       child: Column(
         children: [
-          // Temporarily disabled phone auth due to iOS crash
-          // _buildAuthButton(
-          //   'Phone Number',
-          //   Icons.phone,
-          //   const Color(0xFF4CAF50),
-          //   () => setState(() => _selectedMethod = AuthMethod.phone),
-          // ),
           // Phone Authentication Button
           _buildAuthMethodButton(
             icon: Icons.phone_android,
@@ -321,16 +287,6 @@ class _AuthPageState extends State<AuthPage> {
             subtitle: 'Sign in with your phone number',
             onTap: () => _selectMethod(AuthMethod.phone),
             color: const Color(0xFF4CAF50),
-          ),
-          const SizedBox(height: 16),
-
-          // Email/Password Authentication Button
-          _buildAuthMethodButton(
-            icon: Icons.email,
-            title: 'Continue with Email',
-            subtitle: 'Sign in with email and password',
-            onTap: () => _selectMethod(AuthMethod.email),
-            color: const Color(0xFF2196F3),
           ),
           const SizedBox(height: 16),
 
@@ -373,11 +329,7 @@ class _AuthPageState extends State<AuthPage> {
                 color: color.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(
-                icon,
-                color: color,
-                size: 24,
-              ),
+              child: Icon(icon, color: color, size: 24),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -438,7 +390,9 @@ class _AuthPageState extends State<AuthPage> {
               ),
               Expanded(
                 child: Text(
-                  _phoneCodeSent ? 'Enter Verification Code' : 'Phone Authentication',
+                  _phoneCodeSent
+                      ? 'Enter Verification Code'
+                      : 'Phone Authentication',
                   style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: const Color(0xFF8B8B7A),
@@ -450,7 +404,7 @@ class _AuthPageState extends State<AuthPage> {
             ],
           ),
           const SizedBox(height: 24),
-          
+
           if (!_phoneCodeSent) ...[
             // Country Selector
             Container(
@@ -526,7 +480,10 @@ class _AuthPageState extends State<AuthPage> {
                 if (value == null || value.isEmpty) {
                   return 'Please enter your phone number';
                 }
-                if (!PhoneFormatter.isValidPhoneNumber(value, _selectedCountry)) {
+                if (!PhoneFormatter.isValidPhoneNumber(
+                  value,
+                  _selectedCountry,
+                )) {
                   return 'Please enter a valid phone number for $_selectedCountry';
                 }
                 return null;
@@ -543,7 +500,9 @@ class _AuthPageState extends State<AuthPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              _formattedPhoneNumber.isNotEmpty ? _formattedPhoneNumber : _phoneController.text.trim(),
+              _formattedPhoneNumber.isNotEmpty
+                  ? _formattedPhoneNumber
+                  : _phoneController.text.trim(),
               style: const TextStyle(
                 color: Color(0xFF4CAF50),
                 fontSize: 18,
@@ -551,7 +510,7 @@ class _AuthPageState extends State<AuthPage> {
               ),
             ),
             const SizedBox(height: 24),
-            
+
             TextFormField(
               controller: _smsCodeController,
               keyboardType: TextInputType.number,
@@ -574,14 +533,16 @@ class _AuthPageState extends State<AuthPage> {
               ),
             ),
             const SizedBox(height: 16),
-            
+
             TextButton(
-              onPressed: _isLoading ? null : () {
-                setState(() {
-                  _phoneCodeSent = false;
-                  _errorMessage = '';
-                });
-              },
+              onPressed: _isLoading
+                  ? null
+                  : () {
+                      setState(() {
+                        _phoneCodeSent = false;
+                        _errorMessage = '';
+                      });
+                    },
               child: const Text(
                 'Change Phone Number',
                 style: TextStyle(color: Color(0xFF4CAF50)),
@@ -604,9 +565,8 @@ class _AuthPageState extends State<AuthPage> {
                 textAlign: TextAlign.center,
               ),
             ),
-          
-          if (_errorMessage.isNotEmpty)
-            const SizedBox(height: 20),
+
+          if (_errorMessage.isNotEmpty) const SizedBox(height: 20),
 
           SizedBox(
             width: double.infinity,
@@ -632,188 +592,14 @@ class _AuthPageState extends State<AuthPage> {
                     )
                   : Text(
                       _phoneCodeSent ? 'Verify Code' : 'Send Code',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                    ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmailPasswordAuth() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          children: [
-            Row(
-              children: [
-                IconButton(
-                  onPressed: _goBack,
-                  icon: const Icon(Icons.arrow_back, color: Color(0xFF8B8B7A)),
-                ),
-                Expanded(
-                  child: Text(
-                    'Email & Password',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF8B8B7A),
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                const SizedBox(width: 48), // Balance the back button
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            // Email Field
-            TextFormField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              enabled: !_isLoading,
-              decoration: InputDecoration(
-                labelText: 'Email',
-                prefixIcon: const Icon(Icons.email_outlined),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(
-                    color: Color(0xFF2196F3),
-                    width: 2,
-                  ),
-                ),
-              ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Please enter your email';
-                }
-                if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                    .hasMatch(value)) {
-                  return 'Please enter a valid email';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 20),
-
-            // Password Field
-            TextFormField(
-              controller: _passwordController,
-              obscureText: true,
-              enabled: !_isLoading,
-              decoration: InputDecoration(
-                labelText: 'Password',
-                prefixIcon: const Icon(Icons.lock_outlined),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(
-                    color: Color(0xFF2196F3),
-                    width: 2,
-                  ),
-                ),
-              ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Please enter your password';
-                }
-                if (value.length < 6) {
-                  return 'Password must be at least 6 characters';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 24),
-
-            // Error Message
-            if (_errorMessage.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.withOpacity(0.3)),
-                ),
-                child: Text(
-                  _errorMessage,
-                  style: const TextStyle(color: Colors.red, fontSize: 14),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            
-            if (_errorMessage.isNotEmpty)
-              const SizedBox(height: 20),
-
-            // Sign In Button
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : () => _handleEmailPasswordAuth(false),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2196F3),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 0,
-                ),
-                child: _isLoading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
-                    : const Text(
-                        'Sign In',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
                       ),
-              ),
+                    ),
             ),
-            const SizedBox(height: 16),
-
-            // Sign Up Button
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: OutlinedButton(
-                onPressed: _isLoading ? null : () => _handleEmailPasswordAuth(true),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF2196F3),
-                  side: const BorderSide(color: Color(0xFF2196F3)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text(
-                  'Create Account',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -854,7 +640,7 @@ class _AuthPageState extends State<AuthPage> {
             ],
           ),
           const SizedBox(height: 24),
-          
+
           Container(
             width: 80,
             height: 80,
@@ -893,9 +679,8 @@ class _AuthPageState extends State<AuthPage> {
                 textAlign: TextAlign.center,
               ),
             ),
-          
-          if (_errorMessage.isNotEmpty)
-            const SizedBox(height: 20),
+
+          if (_errorMessage.isNotEmpty) const SizedBox(height: 20),
 
           SizedBox(
             width: double.infinity,
@@ -926,7 +711,10 @@ class _AuthPageState extends State<AuthPage> {
                         const SizedBox(width: 8),
                         const Text(
                           'Continue with Google',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ],
                     ),
@@ -938,9 +726,4 @@ class _AuthPageState extends State<AuthPage> {
   }
 }
 
-enum AuthMethod {
-  none,
-  phone,
-  email,
-  google,
-} 
+enum AuthMethod { none, phone, google }

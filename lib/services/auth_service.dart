@@ -5,15 +5,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  // Now we can use the constructor with serverClientId in version 6.3.0
   final GoogleSignIn _googleSignIn = GoogleSignIn(
-    serverClientId: '262497079999-gmkgko3fnss9pt572gt2aehdgp5sedvc.apps.googleusercontent.com',
+    serverClientId:
+        '262497079999-gmkgko3fnss9pt572gt2aehdgp5sedvc.apps.googleusercontent.com',
+    scopes: ['email', 'profile'],
   );
 
   // Initialize testing mode for iOS Simulator
   static Future<void> initializeTestingMode() async {
     if (kDebugMode) {
-      await FirebaseAuth.instance.setSettings(appVerificationDisabledForTesting: true);
+      await FirebaseAuth.instance.setSettings(
+        appVerificationDisabledForTesting: true,
+      );
     }
   }
 
@@ -23,33 +26,50 @@ class AuthService {
   // Auth state changes stream
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  // Sign in with email and password
-  Future<UserCredential> signInWithEmailAndPassword(
-      String email, String password) async {
+  // Google Sign In - handles both new and existing users
+  Future<UserCredential> signInWithGoogle() async {
     try {
-      return await _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-    } catch (e) {
-      throw _handleAuthError(e);
-    }
-  }
+      // Sign out from Google first to force account selection
+      await _googleSignIn.signOut();
 
-  // Sign up with email and password
-  Future<UserCredential> createUserWithEmailAndPassword(
-      String email, String password) async {
-    try {
-      // Check if email already exists in our database
-      final emailExists = await isEmailExists(email);
-      if (emailExists) {
-        throw Exception('An account with this email already exists.');
+      // Trigger the authentication flow
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+
+      if (googleUser == null) {
+        throw Exception('Google Sign In was cancelled by the user.');
       }
 
-      return await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
+      // Get the authentication tokens
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      // Create a new credential for Firebase
+      final credential = GoogleAuthProvider.credential(
+        idToken: googleAuth.idToken,
       );
+
+      // Sign in to Firebase with the Google credential
+      final userCredential = await _auth.signInWithCredential(credential);
+
+      // Check if this user already has a profile in our database
+      if (userCredential.user != null) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .get();
+
+        if (!userDoc.exists) {
+          // This is a new user, check for duplicate email in our database
+          final emailExists = await isEmailExists(googleUser.email);
+          if (emailExists) {
+            // Sign out and throw error
+            await _auth.signOut();
+            throw Exception('An account with this email already exists.');
+          }
+        }
+      }
+
+      return userCredential;
     } catch (e) {
       throw _handleAuthError(e);
     }
@@ -64,29 +84,49 @@ class AuthService {
     required Function(String) onCodeAutoRetrievalTimeout,
   }) async {
     try {
-      // Check if phone number already exists in our database
-      // We don't exclude any user here since this is before authentication
-      final phoneExists = await isPhoneNumberExists(phoneNumber);
-      if (phoneExists) {
-        onVerificationFailed(FirebaseAuthException(
-          code: 'phone-number-already-exists',
-          message: 'An account with this phone number already exists.',
-        ));
-        return;
-      }
-
       await _auth.verifyPhoneNumber(
         phoneNumber: phoneNumber,
         verificationCompleted: (PhoneAuthCredential credential) async {
           // Auto-verification if SMS code is detected automatically
           try {
-            await _auth.signInWithCredential(credential);
+            final userCredential = await _auth.signInWithCredential(credential);
+
+            // Check if this user already has a profile in our database
+            if (userCredential.user != null) {
+              final userDoc = await FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(userCredential.user!.uid)
+                  .get();
+
+              if (!userDoc.exists) {
+                // This is a new user, check for duplicate phone in our database
+                final phoneExists = await isPhoneNumberExists(
+                  userCredential.user!.phoneNumber ?? '',
+                  excludeUserId: userCredential.user!.uid,
+                );
+                if (phoneExists) {
+                  // Sign out and throw error
+                  await _auth.signOut();
+                  onVerificationFailed(
+                    FirebaseAuthException(
+                      code: 'phone-number-already-exists',
+                      message:
+                          'An account with this phone number already exists.',
+                    ),
+                  );
+                  return;
+                }
+              }
+            }
+
             onVerificationCompleted(credential.smsCode ?? '');
           } catch (e) {
-            onVerificationFailed(FirebaseAuthException(
-              code: 'auto-verification-failed',
-              message: 'Auto-verification failed: ${e.toString()}',
-            ));
+            onVerificationFailed(
+              FirebaseAuthException(
+                code: 'auto-verification-failed',
+                message: 'Auto-verification failed: ${e.toString()}',
+              ),
+            );
           }
         },
         verificationFailed: onVerificationFailed,
@@ -116,17 +156,16 @@ class AuthService {
       );
 
       final userCredential = await _auth.signInWithCredential(credential);
-      
+
       // Check if this user already has a profile in our database
       if (userCredential.user != null) {
         final userDoc = await FirebaseFirestore.instance
             .collection('users')
             .doc(userCredential.user!.uid)
             .get();
-        
+
         if (!userDoc.exists) {
           // This is a new user, check for duplicate phone/email
-          // Pass the current user ID to exclude it from duplicate checking
           final phoneExists = await isPhoneNumberExists(
             userCredential.user!.phoneNumber ?? '',
             excludeUserId: userCredential.user!.uid,
@@ -134,7 +173,9 @@ class AuthService {
           if (phoneExists) {
             // Sign out and throw error
             await _auth.signOut();
-            throw Exception('An account with this phone number already exists.');
+            throw Exception(
+              'An account with this phone number already exists.',
+            );
           }
         }
       }
@@ -145,44 +186,10 @@ class AuthService {
     }
   }
 
-  // Google Sign In
-  Future<UserCredential> signInWithGoogle() async {
-    try {
-      // Trigger the authentication flow (method name changed in version 6.3.0)
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      
-      if (googleUser == null) {
-        throw Exception('Google Sign In was cancelled by the user.');
-      }
-
-      // Check if email already exists in our database
-      final emailExists = await isEmailExists(googleUser.email);
-      if (emailExists) {
-        throw Exception('An account with this email already exists.');
-      }
-
-      // Get the authentication tokens
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-
-      // Create a new credential for Firebase
-      final credential = GoogleAuthProvider.credential(
-        idToken: googleAuth.idToken,
-      );
-
-      // Sign in to Firebase with the Google credential
-      return await _auth.signInWithCredential(credential);
-    } catch (e) {
-      throw _handleAuthError(e);
-    }
-  }
-
   // Sign out
   Future<void> signOut() async {
     try {
-      await Future.wait([
-        _auth.signOut(),
-        _googleSignIn.signOut(),
-      ]);
+      await Future.wait([_auth.signOut(), _googleSignIn.signOut()]);
     } catch (e) {
       // If Google sign out fails, still try to sign out from Firebase
       await _auth.signOut();
@@ -231,23 +238,26 @@ class AuthService {
   }
 
   // Check if phone number already exists in database (excluding current user)
-  Future<bool> isPhoneNumberExists(String phoneNumber, {String? excludeUserId}) async {
+  Future<bool> isPhoneNumberExists(
+    String phoneNumber, {
+    String? excludeUserId,
+  }) async {
     try {
       final cleanPhone = _getCleanPhoneNumber(phoneNumber);
       print('Checking for phone number: $cleanPhone');
-      
+
       // Get all users and check for phone number matches
       final querySnapshot = await FirebaseFirestore.instance
           .collection('users')
           .get();
-      
+
       for (final doc in querySnapshot.docs) {
         // Skip the current user if excludeUserId is provided
         if (excludeUserId != null && doc.id == excludeUserId) {
           print('Skipping current user: ${doc.id}');
           continue;
         }
-        
+
         final userData = doc.data();
         if (userData['phone'] != null) {
           final existingPhone = _getCleanPhoneNumber(userData['phone']);
@@ -258,7 +268,7 @@ class AuthService {
           }
         }
       }
-      
+
       print('No duplicate phone number found');
       return false;
     } catch (e) {
@@ -276,7 +286,7 @@ class AuthService {
           .where('email', isEqualTo: cleanEmail)
           .limit(1)
           .get();
-      
+
       return querySnapshot.docs.isNotEmpty;
     } catch (e) {
       print('Error checking email: $e');
@@ -286,41 +296,41 @@ class AuthService {
 
   // Helper method to clean phone number for comparison
   String _getCleanPhoneNumber(String phoneNumber) {
-    if (phoneNumber == null || phoneNumber.isEmpty) {
+    if (phoneNumber.isEmpty) {
       return '';
     }
-    
+
     // Remove all non-digit characters
     final digitsOnly = phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
-    
+
     // If it starts with country code, keep it as is
     if (digitsOnly.startsWith('1') && digitsOnly.length == 11) {
       return '+$digitsOnly';
     }
-    
+
     // If it's 10 digits, assume US number
     if (digitsOnly.length == 10) {
       return '+1$digitsOnly';
     }
-    
+
     // If it's 11 digits and doesn't start with 1, assume it's a country code
     if (digitsOnly.length == 11) {
       return '+$digitsOnly';
     }
-    
+
     // Return as is if it already has country code
     if (phoneNumber.startsWith('+')) {
       return phoneNumber;
     }
-    
+
     // For any other format, just return the digits with +
     if (digitsOnly.isNotEmpty) {
       return '+$digitsOnly';
     }
-    
+
     return phoneNumber;
   }
 
   // Store verification ID for phone auth
   String? _verificationId;
-} 
+}
