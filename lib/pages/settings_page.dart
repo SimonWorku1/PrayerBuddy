@@ -8,6 +8,7 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
+class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -42,12 +43,17 @@ class SettingsPage extends StatefulWidget {
             // Account actions as a clickable tab
             Card(
               child: ListTile(
-                leading: const Icon(Icons.person_outline, color: Color(0xFF6B4EFF)),
+                leading: const Icon(
+                  Icons.person_outline,
+                  color: Color(0xFF6B4EFF),
+                ),
                 title: const Text('Account'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const AccountActionsPage()),
+                    MaterialPageRoute(
+                      builder: (_) => const AccountActionsPage(),
+                    ),
                   );
                 },
               ),

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'dart:async';
 
 class AccountActionsPage extends StatefulWidget {
   const AccountActionsPage({super.key});
@@ -12,18 +13,19 @@ class AccountActionsPage extends StatefulWidget {
 class _AccountActionsPageState extends State<AccountActionsPage> {
   bool _busy = false;
 
-  Future<void> _signOutWithSms() async {
+  Future<bool> _reauthenticateWithSms() async {
     final user = FirebaseAuth.instance.currentUser;
     final phone = user?.phoneNumber;
     if (user == null || phone == null || phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No phone number on this account.')),
       );
-      return;
+      return false;
     }
 
     String verificationId = '';
     String code = '';
+    final completer = Completer<bool>();
 
     await FirebaseAuth.instance.verifyPhoneNumber(
       phoneNumber: phone,
@@ -32,6 +34,7 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('SMS failed: ${e.message}')));
+        if (!completer.isCompleted) completer.complete(false);
       },
       codeSent: (vId, _) async {
         verificationId = vId;
@@ -62,40 +65,46 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
             );
           },
         );
-
-        if (code.isEmpty) return;
+        if (code.isEmpty) {
+          if (!completer.isCompleted) completer.complete(false);
+          return;
+        }
         try {
           final credential = PhoneAuthProvider.credential(
             verificationId: verificationId,
             smsCode: code,
           );
           await user.reauthenticateWithCredential(credential);
-          await FirebaseAuth.instance.signOut();
-          if (!mounted) return;
-          Navigator.of(context).pushNamedAndRemoveUntil('/auth', (_) => false);
+          if (!completer.isCompleted) completer.complete(true);
         } catch (e) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(SnackBar(content: Text('Verification failed: $e')));
+          if (!completer.isCompleted) completer.complete(false);
         }
       },
-      codeAutoRetrievalTimeout: (_) {},
+      codeAutoRetrievalTimeout: (_) {
+        if (!completer.isCompleted) completer.complete(false);
+      },
       timeout: const Duration(seconds: 60),
     );
+
+    // Wait for the result produced in callbacks
+    return completer.future;
   }
 
-  Future<void> _signOutWithEmailLink() async {
+  Future<bool> _reauthenticateWithEmail() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.email == null || user.email!.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No email on this account.')),
       );
-      return;
+      return false;
     }
     setState(() => _busy = true);
     try {
       await user.sendEmailVerification();
-      if (!mounted) return;
+      if (!mounted) return false;
       final proceed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -117,9 +126,7 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
       );
       if (proceed == true) {
         await user.reload();
-        await FirebaseAuth.instance.signOut();
-        if (!mounted) return;
-        Navigator.of(context).pushNamedAndRemoveUntil('/auth', (_) => false);
+        return true;
       }
     } catch (e) {
       if (mounted) {
@@ -130,35 +137,56 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+    return false;
   }
 
   Future<void> _deleteAccount() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    final confirmed = await showDialog<bool>(
+
+    // Choose verification method
+    final method = await showModalBottomSheet<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Account'),
-        content: const Text(
-          'Are you sure you want to delete your account? This cannot be undone.',
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.sms_outlined),
+              title: const Text('Verify by SMS code'),
+              onTap: () => Navigator.pop(context, 'sms'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.email_outlined),
+              title: const Text('Verify by email link'),
+              onTap: () => Navigator.pop(context, 'email'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
       ),
     );
-    if (confirmed != true) return;
+    if (method == null) return;
+
+    bool ok = false;
+    if (method == 'sms') ok = await _reauthenticateWithSms();
+    if (method == 'email') ok = await _reauthenticateWithEmail();
+    if (!ok) return;
 
     setState(() => _busy = true);
     try {
+      // Release handle if present
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final data = userDoc.data() as Map<String, dynamic>?;
+      final handle = data != null ? (data['handle'] ?? '') as String : '';
+      if (handle.isNotEmpty) {
+        final handleRef = FirebaseFirestore.instance
+            .collection('handles')
+            .doc(handle);
+        await handleRef.delete();
+      }
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -199,31 +227,29 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
                   onTap: _busy
                       ? null
                       : () async {
-                          final choice = await showModalBottomSheet<String>(
+                          final confirm = await showDialog<bool>(
                             context: context,
-                            builder: (context) => SafeArea(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  ListTile(
-                                    leading: const Icon(Icons.sms_outlined),
-                                    title: const Text('Verify by SMS code'),
-                                    onTap: () => Navigator.pop(context, 'sms'),
-                                  ),
-                                  ListTile(
-                                    leading: const Icon(Icons.email_outlined),
-                                    title: const Text('Verify by email link'),
-                                    onTap: () =>
-                                        Navigator.pop(context, 'email'),
-                                  ),
-                                ],
-                              ),
+                            builder: (context) => AlertDialog(
+                              title: const Text('Sign out?'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('Cancel'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('Sign out'),
+                                ),
+                              ],
                             ),
                           );
-                          if (choice == 'sms') {
-                            await _signOutWithSms();
-                          } else if (choice == 'email') {
-                            await _signOutWithEmailLink();
+                          if (confirm == true) {
+                            await FirebaseAuth.instance.signOut();
+                            if (!mounted) return;
+                            Navigator.of(
+                              context,
+                            ).pushNamedAndRemoveUntil('/auth', (_) => false);
                           }
                         },
                 ),

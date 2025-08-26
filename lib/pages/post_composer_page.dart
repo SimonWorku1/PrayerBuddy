@@ -31,8 +31,29 @@ class _PostComposerPageState extends State<PostComposerPage> {
     setState(() => _submitting = true);
     try {
       final posts = FirebaseFirestore.instance.collection('posts');
+
+      // Read a snapshot of the user's current name/handle so non-anonymous
+      // posts can be displayed without extra lookups.
+      String ownerName = '';
+      String ownerHandle = '';
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (userDoc.exists) {
+          final data = userDoc.data() as Map<String, dynamic>;
+          ownerName = (data['name'] ?? '') as String;
+          ownerHandle = (data['handle'] ?? '') as String;
+        }
+      } catch (_) {
+        // Ignore lookup errors; we still allow posting.
+      }
+
       await posts.add({
         'ownerId': user.uid,
+        'ownerName': ownerName,
+        'ownerHandle': ownerHandle,
         'title': _titleController.text.trim(),
         'content': _contentController.text.trim(),
         'anonymous': _anonymous,

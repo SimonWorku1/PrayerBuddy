@@ -496,6 +496,9 @@ class _PostTile extends StatelessWidget {
     final isAnonymous = (data['visibility'] ?? 'public') == 'anonymous';
     final postType = (data['postType'] ?? 'prayer') as String;
     final ownerId = (data['ownerId'] ?? '') as String;
+    final ownerNameInline = (data['ownerName'] ?? '') as String;
+    final ownerHandleInline = (data['ownerHandle'] ?? '') as String;
+    final currentUser = FirebaseAuth.instance.currentUser;
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Padding(
@@ -528,40 +531,77 @@ class _PostTile extends StatelessWidget {
             ),
             if (!isAnonymous && ownerId.isNotEmpty) ...[
               const SizedBox(height: 6),
-              FutureBuilder<DocumentSnapshot>(
-                future: FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(ownerId)
-                    .get(),
-                builder: (context, snap) {
-                  final name = snap.hasData && snap.data!.exists
-                      ? ((snap.data!.data() as Map<String, dynamic>)['name'] ??
-                                'User')
-                            as String
-                      : 'User';
-                  return InkWell(
-                    onTap: () {
-                      if (ownerId.isNotEmpty) {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => UserProfilePage(userId: ownerId),
-                          ),
-                        );
-                      }
+              Builder(
+                builder: (context) {
+                  // Always resolve latest user display fields on render so updates show
+                  return FutureBuilder<DocumentSnapshot>(
+                    future: FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(ownerId)
+                        .get(),
+                    builder: (context, snap) {
+                      final name = snap.hasData && snap.data!.exists
+                          ? ((snap.data!.data()
+                                        as Map<String, dynamic>)['name'] ??
+                                    'User')
+                                as String
+                          : (ownerNameInline.isNotEmpty
+                                ? ownerNameInline
+                                : 'User');
+                      final handle = snap.hasData && snap.data!.exists
+                          ? ((snap.data!.data()
+                                        as Map<String, dynamic>)['handle'] ??
+                                    '')
+                                as String
+                          : ownerHandleInline;
+                      final photo = snap.hasData && snap.data!.exists
+                          ? ((snap.data!.data()
+                                        as Map<String, dynamic>)['photoUrl'] ??
+                                    '')
+                                as String
+                          : '';
+                      return InkWell(
+                        onTap: () {
+                          if (ownerId.isNotEmpty) {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    UserProfilePage(userId: ownerId),
+                              ),
+                            );
+                          }
+                        },
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 12,
+                              backgroundImage: photo.isNotEmpty
+                                  ? NetworkImage(photo)
+                                  : null,
+                              child: photo.isEmpty
+                                  ? const Icon(Icons.person, size: 14)
+                                  : null,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (handle.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              Text(
+                                '@$handle',
+                                style: const TextStyle(color: Colors.grey),
+                              ),
+                            ],
+                            const Spacer(),
+                            _FriendAction(ownerId: ownerId),
+                          ],
+                        ),
+                      );
                     },
-                    child: Row(
-                      children: [
-                        const CircleAvatar(
-                          radius: 12,
-                          child: Icon(Icons.person, size: 14),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          name,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                      ],
-                    ),
                   );
                 },
               ),
@@ -580,6 +620,64 @@ class _PostTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _FriendAction extends StatelessWidget {
+  final String ownerId;
+  const _FriendAction({required this.ownerId});
+
+  @override
+  Widget build(BuildContext context) {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null || currentUser.uid == ownerId) {
+      return const SizedBox.shrink();
+    }
+    final myFriends = FirebaseFirestore.instance
+        .collection('users')
+        .doc(currentUser.uid)
+        .collection('friends')
+        .doc(ownerId)
+        .snapshots();
+    return StreamBuilder<DocumentSnapshot>(
+      stream: myFriends,
+      builder: (context, snap) {
+        final isFriend = snap.hasData && snap.data!.exists;
+        if (isFriend) {
+          return Chip(
+            avatar: const Icon(
+              Icons.check_circle,
+              size: 16,
+              color: Color(0xFF6B4EFF),
+            ),
+            label: const Text('Friends'),
+            backgroundColor: const Color(0xFF6B4EFF).withOpacity(0.1),
+            shape: const StadiumBorder(),
+          );
+        }
+        return TextButton.icon(
+          onPressed: () async {
+            final uid = currentUser.uid;
+            await FirebaseFirestore.instance
+                .collection('friend_requests')
+                .doc('${uid}_$ownerId')
+                .set({
+                  'from': uid,
+                  'to': ownerId,
+                  'status': 'pending',
+                  'createdAt': FieldValue.serverTimestamp(),
+                });
+            if (context.mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('Request sent')));
+            }
+          },
+          icon: const Icon(Icons.person_add_alt_1, size: 18),
+          label: const Text('Add'),
+        );
+      },
     );
   }
 }

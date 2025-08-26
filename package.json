@@ -1,0 +1,18 @@
+{
+  "name": "prayerbuddy-admin-scripts",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Admin maintenance scripts for PrayerBuddy",
+  "scripts": {
+    "cleanup:placeholders:dry": "node scripts/cleanup_placeholders.mjs --dry-run",
+    "cleanup:placeholders": "node scripts/cleanup_placeholders.mjs",
+    "handles:reset:dry": "node scripts/reset_handle_limits.mjs --dry-run",
+    "handles:reset": "node scripts/reset_handle_limits.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0"
+  }
+}
+
+

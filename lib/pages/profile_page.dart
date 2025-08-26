@@ -78,47 +78,71 @@ class _ProfilePageState extends State<ProfilePage> {
       final userSnap = await tx.get(userRef);
       final userData = userSnap.data() as Map<String, dynamic>? ?? {};
       final currentHandle = (userData['handle'] ?? '') as String;
+      final changeCount = (userData['handleChangeCount'] ?? 0) as int;
+      final resetAt = userData['handleChangeResetAt'] as Timestamp?;
 
       // If unchanged, nothing to do
       if (currentHandle == newHandle) return;
 
-      // Check cooldown (30 days)
-      final lastUpdated = userData['handleUpdatedAt'];
-      if (lastUpdated != null && lastUpdated is Timestamp) {
-        final nextAllowed = lastUpdated.toDate().add(const Duration(days: 30));
-        if (DateTime.now().isBefore(nextAllowed)) {
-          throw Exception(
-            'You can change your @ again on ${nextAllowed.toLocal()}',
-          );
-        }
+      // Enforce <= 3 changes in a 30-day window
+      final now = DateTime.now();
+      DateTime? resetAtDt = resetAt?.toDate();
+      int effectiveCount = changeCount;
+      if (resetAtDt == null ||
+          now.isAfter(resetAtDt.add(const Duration(days: 30)))) {
+        // Window expired or not started – reset
+        resetAtDt = now;
+        effectiveCount = 0;
+      }
+      if (effectiveCount >= 3) {
+        throw Exception(
+          'You have changed your @ too many times. Try again later.',
+        );
       }
 
       // Ensure target handle is free
       final hSnap = await tx.get(handleRef);
+
+      // Read old handle doc (if any) BEFORE any writes to satisfy txn rules
+      DocumentSnapshot? oldSnap;
+      if (currentHandle.isNotEmpty) {
+        final oldRef = db.collection('handles').doc(currentHandle);
+        oldSnap = await tx.get(oldRef);
+      }
       if (hSnap.exists) {
         final hData = hSnap.data() as Map<String, dynamic>;
         if (hData['uid'] != user.uid) {
           throw Exception('This @handle is already taken');
         }
-        // If doc exists and owned by user, it's effectively same; but since currentHandle != newHandle, user had a different one before; allow proceed
+        // If the handle doc already exists and is owned by this user, do not
+        // write to it again. Security rules only allow create (not update)
+        // on `handles`, so attempting to set would be denied.
+      } else {
+        // Reserve new handle (create only)
+        tx.set(handleRef, {
+          'uid': user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
       }
 
-      // Reserve new handle
-      tx.set(handleRef, {
-        'uid': user.uid,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-
-      // Release old handle if present
+      // Release old handle if present (no read after writes inside txn)
       if (currentHandle.isNotEmpty) {
         final oldRef = db.collection('handles').doc(currentHandle);
-        tx.delete(oldRef);
+        final owned =
+            oldSnap != null &&
+            oldSnap.exists &&
+            ((oldSnap.data() as Map<String, dynamic>)['uid'] == user.uid);
+        if (owned) {
+          tx.delete(oldRef);
+        }
       }
 
       // Update user doc
       tx.set(userRef, {
         'handle': newHandle,
         'handleUpdatedAt': FieldValue.serverTimestamp(),
+        'handleChangeResetAt': Timestamp.fromDate(resetAtDt!),
+        'handleChangeCount': effectiveCount + 1,
       }, SetOptions(merge: true));
     });
   }
@@ -293,14 +317,55 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
               const SizedBox(height: 24),
-              TextFormField(
-                controller: _handleController,
-                decoration: const InputDecoration(
-                  labelText: 'Handle (@username)',
-                  hintText: 'e.g. @john_doe',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.alternate_email),
-                ),
+              StreamBuilder<DocumentSnapshot>(
+                stream: FirebaseAuth.instance.currentUser == null
+                    ? null
+                    : FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(FirebaseAuth.instance.currentUser!.uid)
+                          .snapshots(),
+                builder: (context, snapshot) {
+                  bool lock = false;
+                  if (snapshot.hasData && snapshot.data!.exists) {
+                    final data = snapshot.data!.data() as Map<String, dynamic>;
+                    final cnt = (data['handleChangeCount'] ?? 0) as int;
+                    final rst = data['handleChangeResetAt'] as Timestamp?;
+                    final now = DateTime.now();
+                    final windowStart = rst?.toDate();
+                    if (windowStart != null &&
+                        now.isBefore(
+                          windowStart.add(const Duration(days: 30)),
+                        ) &&
+                        cnt >= 3) {
+                      lock = true;
+                    }
+                  }
+                  return GestureDetector(
+                    onTap: () {
+                      if (lock) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'You changed your @ too many times. Please try again later.',
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    child: AbsorbPointer(
+                      absorbing: lock,
+                      child: TextFormField(
+                        controller: _handleController,
+                        decoration: const InputDecoration(
+                          labelText: 'Handle (@username)',
+                          hintText: 'e.g. @john_doe',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.alternate_email),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 16),
               TextFormField(

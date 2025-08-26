@@ -61,12 +61,20 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     await db.runTransaction((tx) async {
       final hSnap = await tx.get(handleRef);
       if (hSnap.exists) {
-        throw Exception('This @handle is already taken');
+        // If another user owns it, block. If current user somehow already owns
+        // it, skip writing to avoid violating rules (no updates allowed).
+        final hData = hSnap.data() as Map<String, dynamic>;
+        if (hData['uid'] != user.uid) {
+          throw Exception('This @handle is already taken');
+        }
+        // Owned by this user already; do nothing to `handles`.
+      } else {
+        tx.set(handleRef, {
+          'uid': user.uid,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
       }
-      tx.set(handleRef, {
-        'uid': user.uid,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+
       tx.set(userRef, {
         'handle': newHandle,
         'handleUpdatedAt': FieldValue.serverTimestamp(),
@@ -94,6 +102,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
           .set({
             'handle': _sanitizeHandle(_handleController.text),
             'name': _nameController.text.trim(),
+            'isPlaceholder': false,
             'phone': _phoneController.text.trim().isEmpty
                 ? null
                 : _phoneController.text.trim(),

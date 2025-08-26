@@ -16,6 +16,15 @@
         { "fieldPath": "visibility", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionId": "friend_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "to", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

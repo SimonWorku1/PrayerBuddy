@@ -97,6 +97,11 @@ class _AuthPageState extends State<AuthPage> {
           _smsCodeController.clear();
           _phoneController.clear();
         });
+        if (mounted) {
+          Navigator.of(
+            context,
+          ).pushNamedAndRemoveUntil('/home', (route) => false);
+        }
       } catch (e) {
         setState(() {
           _errorMessage = e.toString();
@@ -186,6 +191,9 @@ class _AuthPageState extends State<AuthPage> {
 
     try {
       await _authService.signInWithGoogle();
+      if (mounted) {
+        Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
+      }
     } catch (e) {
       setState(() {
         _errorMessage = e.toString();
