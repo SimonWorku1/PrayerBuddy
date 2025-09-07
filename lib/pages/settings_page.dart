@@ -19,7 +19,7 @@ class _SettingsPageState extends State<SettingsPage> {
           style: TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF8B8B7A),
+            color: Color(0xFF6C5E55),
           ),
         ),
         backgroundColor: Colors.transparent,
@@ -35,7 +35,7 @@ class _SettingsPageState extends State<SettingsPage> {
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.bold,
-                color: Color(0xFF6B4EFF),
+                color: Color(0xFF795548),
               ),
             ),
             const SizedBox(height: 20),
@@ -45,7 +45,7 @@ class _SettingsPageState extends State<SettingsPage> {
               child: ListTile(
                 leading: const Icon(
                   Icons.person_outline,
-                  color: Color(0xFF6B4EFF),
+                  color: Color(0xFF795548),
                 ),
                 title: const Text('Account'),
                 trailing: const Icon(Icons.arrow_forward_ios, size: 16),
@@ -81,7 +81,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     const ListTile(
                       leading: Icon(
                         Icons.info_outline,
-                        color: Color(0xFF6B4EFF),
+                        color: Color(0xFF795548),
                       ),
                       title: Text('Version'),
                       subtitle: Text('1.0.0'),
@@ -90,7 +90,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     const ListTile(
                       leading: Icon(
                         Icons.description_outlined,
-                        color: Color(0xFF6B4EFF),
+                        color: Color(0xFF795548),
                       ),
                       title: Text('Terms of Service'),
                       trailing: Icon(Icons.arrow_forward_ios, size: 16),
@@ -99,7 +99,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     const ListTile(
                       leading: Icon(
                         Icons.privacy_tip_outlined,
-                        color: Color(0xFF6B4EFF),
+                        color: Color(0xFF795548),
                       ),
                       title: Text('Privacy Policy'),
                       trailing: Icon(Icons.arrow_forward_ios, size: 16),

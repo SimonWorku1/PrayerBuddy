@@ -10,6 +10,7 @@ import 'pages/profile_page.dart';
 import 'pages/find_friends_page.dart';
 import 'pages/post_composer_page.dart';
 import 'pages/user_profile_page.dart';
+import 'pages/messages_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,11 +43,46 @@ class PrayerBuddyApp extends StatelessWidget {
       title: 'PrayerBuddy',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF6B4EFF),
+          seedColor: const Color(0xFF795548), // earthy brown
           brightness: Brightness.light,
         ),
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFFF5F5DC),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF6C5E55),
+          ),
+          foregroundColor: Color(0xFF6C5E55),
+        ),
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          elevation: 1,
+          shadowColor: Colors.black.withOpacity(0.05),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        ),
+        chipTheme: ChipThemeData(
+          shape: const StadiumBorder(),
+          backgroundColor: const Color(0xFF795548).withOpacity(0.08),
+          selectedColor: const Color(0xFF795548).withOpacity(0.16),
+          labelStyle: const TextStyle(color: Color(0xFF6C5E55)),
+        ),
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: ZoomPageTransitionsBuilder(),
+            TargetPlatform.iOS: ZoomPageTransitionsBuilder(),
+            TargetPlatform.macOS: ZoomPageTransitionsBuilder(),
+            TargetPlatform.linux: ZoomPageTransitionsBuilder(),
+            TargetPlatform.windows: ZoomPageTransitionsBuilder(),
+          },
+        ),
         popupMenuTheme: PopupMenuThemeData(
           elevation: 8,
           shape: RoundedRectangleBorder(
@@ -84,7 +120,7 @@ class PrayerBuddyApp extends StatelessWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF6B4EFF), width: 2),
+            borderSide: const BorderSide(color: Color(0xFF795548), width: 2),
           ),
         ),
       ),
@@ -106,11 +142,13 @@ class AuthWrapper extends StatelessWidget {
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: Color(0xFFF5F5DC),
+          return Scaffold(
+            backgroundColor: const Color(0xFFF5F5DC),
             body: Center(
               child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6B4EFF)),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  Theme.of(context).colorScheme.primary,
+                ),
               ),
             ),
           );
@@ -142,11 +180,13 @@ class ProfileCheckWrapper extends StatelessWidget {
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: Color(0xFFF5F5DC),
+          return Scaffold(
+            backgroundColor: const Color(0xFFF5F5DC),
             body: Center(
               child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6B4EFF)),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  Theme.of(context).colorScheme.primary,
+                ),
               ),
             ),
           );
@@ -179,14 +219,32 @@ class _PrayerBuddyHomePageState extends State<PrayerBuddyHomePage> {
     const HomeFeedPage(),
     const FindFriendsPage(),
     const SizedBox.shrink(),
-    const NotificationsPage(),
+    const MessagesPage(),
     const ProfilePage(),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _pages[_selectedIndex],
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 250),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) {
+          final inFromRight = Tween<Offset>(
+            begin: const Offset(0.05, 0),
+            end: Offset.zero,
+          ).animate(animation);
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(position: inFromRight, child: child),
+          );
+        },
+        child: KeyedSubtree(
+          key: ValueKey<int>(_selectedIndex),
+          child: _pages[_selectedIndex],
+        ),
+      ),
       bottomNavigationBar: Container(
         height: 80,
         decoration: const BoxDecoration(
@@ -209,7 +267,7 @@ class _PrayerBuddyHomePageState extends State<PrayerBuddyHomePage> {
             _buildNavItem(0, Icons.home_outlined, Icons.home, 'Home'),
             _buildNavItem(1, Icons.group_outlined, Icons.group, 'Friends'),
             _buildCenterAddButton(),
-            _buildNavItem(3, Icons.public_outlined, Icons.public, 'Explore'),
+            _buildNavItem(3, Icons.mail_outline, Icons.mail, 'Messages'),
             _buildNavItem(4, Icons.person_outline, Icons.person, 'Profile'),
           ],
         ),
@@ -227,7 +285,7 @@ class _PrayerBuddyHomePageState extends State<PrayerBuddyHomePage> {
       child: Container(
         decoration: const BoxDecoration(
           shape: BoxShape.circle,
-          color: Color(0xFF6B4EFF),
+          color: Color(0xFF795548),
         ),
         padding: const EdgeInsets.all(8),
         child: const Icon(Icons.add, color: Colors.white, size: 30),
@@ -251,21 +309,32 @@ class _PrayerBuddyHomePageState extends State<PrayerBuddyHomePage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            isSelected ? filledIcon : outlineIcon,
-            size: 28,
-            color: isSelected
-                ? const Color(0xFF8B8B7A)
-                : const Color(0xFFB8B8A8),
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 1.0, end: isSelected ? 1.1 : 1.0),
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            builder: (context, scale, child) {
+              return Transform.scale(
+                scale: scale,
+                child: Icon(
+                  isSelected ? filledIcon : outlineIcon,
+                  size: 28,
+                  color: isSelected
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.outlineVariant,
+                ),
+              );
+            },
           ),
           const SizedBox(height: 4),
           Text(
             label,
             style: TextStyle(
               fontSize: 12,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
               color: isSelected
-                  ? const Color(0xFF8B8B7A)
-                  : const Color(0xFFB8B8A8),
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.outlineVariant,
             ),
           ),
         ],
@@ -296,19 +365,16 @@ class HomeFeedPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text(
+        title: Text(
           'PrayerBuddy',
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFF8B8B7A),
-          ),
+          style: Theme.of(context).appBarTheme.titleTextStyle,
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.search, color: Color(0xFF8B8B7A)),
+            icon: Icon(
+              Icons.search,
+              color: Theme.of(context).appBarTheme.foregroundColor,
+            ),
             onPressed: () {},
           ),
         ],
@@ -359,11 +425,29 @@ class _FeedSwitcherState extends State<_FeedSwitcher> {
         ),
         const SizedBox(height: 8),
         Expanded(
-          child: _tab == 'friends'
-              ? const _FriendsFeed()
-              : _tab == 'world'
-              ? const _WorldFeed()
-              : const _AnonymousFeed(),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 220),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) {
+              final slide = Tween<Offset>(
+                begin: const Offset(0.02, 0),
+                end: Offset.zero,
+              ).animate(animation);
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(position: slide, child: child),
+              );
+            },
+            child: KeyedSubtree(
+              key: ValueKey<String>(_tab),
+              child: _tab == 'friends'
+                  ? const _FriendsFeed()
+                  : _tab == 'world'
+                  ? const _WorldFeed()
+                  : const _AnonymousFeed(),
+            ),
+          ),
         ),
       ],
     );
@@ -377,16 +461,17 @@ class _FriendsFeed extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return const SizedBox.shrink();
-    return FutureBuilder<QuerySnapshot>(
-      future: FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('friends')
-          .limit(10)
-          .get(),
+    final friendsStream = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('friends')
+        .limit(10)
+        .snapshots();
+    return StreamBuilder<QuerySnapshot>(
+      stream: friendsStream,
       builder: (context, snap) {
         if (!snap.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const _PostSkeletonList();
         }
         final friendIds = snap.data!.docs.map((d) => d.id).toList();
         if (friendIds.isEmpty) {
@@ -403,11 +488,11 @@ class _FriendsFeed extends StatelessWidget {
           stream: posts,
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
+              return const _PostSkeletonList();
             }
             final docs = snapshot.data!.docs;
             if (docs.isEmpty) {
-              return const Center(child: Text('No posts yet'));
+              return const Center(child: Text('No posts yet!'));
             }
             return ListView.builder(
               itemCount: docs.length,
@@ -437,11 +522,11 @@ class _WorldFeed extends StatelessWidget {
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const _PostSkeletonList();
         }
         final docs = snapshot.data!.docs.toList()..shuffle();
         if (docs.isEmpty) {
-          return const Center(child: Text('No posts yet'));
+          return const Center(child: Text('No posts yet!'));
         }
         return ListView.builder(
           itemCount: docs.length,
@@ -469,11 +554,11 @@ class _AnonymousFeed extends StatelessWidget {
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const _PostSkeletonList();
         }
         final docs = snapshot.data!.docs;
         if (docs.isEmpty) {
-          return const Center(child: Text('No anonymous posts yet'));
+          return const Center(child: Text('No posts yet!'));
         }
         return ListView.builder(
           itemCount: docs.length,
@@ -484,6 +569,118 @@ class _AnonymousFeed extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+class _PostSkeletonList extends StatelessWidget {
+  const _PostSkeletonList();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      itemCount: 6,
+      itemBuilder: (context, index) => const _PostSkeletonTile(),
+    );
+  }
+}
+
+class _PostSkeletonTile extends StatelessWidget {
+  const _PostSkeletonTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            _ShimmerBox(width: 140, height: 14),
+            SizedBox(height: 12),
+            _ShimmerBox(width: double.infinity, height: 12),
+            SizedBox(height: 8),
+            _ShimmerBox(width: double.infinity, height: 12),
+            SizedBox(height: 8),
+            _ShimmerBox(width: 180, height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShimmerBox extends StatefulWidget {
+  final double width;
+  final double height;
+  const _ShimmerBox({required this.width, required this.height});
+
+  @override
+  State<_ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<_ShimmerBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final baseColor = Colors.grey.shade300;
+    final highlightColor = Colors.grey.shade100;
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return ShaderMask(
+          shaderCallback: (rect) {
+            final width = rect.width;
+            final gradientWidth = width / 2;
+            final dx =
+                (width + gradientWidth) * _controller.value - gradientWidth;
+            return LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [baseColor, highlightColor, baseColor],
+              stops: const [0.35, 0.5, 0.65],
+              transform: GradientTranslation(dx),
+            ).createShader(rect);
+          },
+          blendMode: BlendMode.srcATop,
+          child: Container(
+            width: widget.width,
+            height: widget.height,
+            decoration: BoxDecoration(
+              color: baseColor,
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class GradientTranslation extends GradientTransform {
+  final double dx;
+  const GradientTranslation(this.dx);
+
+  @override
+  Matrix4 transform(Rect bounds, {TextDirection? textDirection}) {
+    return Matrix4.identity()..translate(dx);
   }
 }
 
@@ -498,7 +695,6 @@ class _PostTile extends StatelessWidget {
     final ownerId = (data['ownerId'] ?? '') as String;
     final ownerNameInline = (data['ownerName'] ?? '') as String;
     final ownerHandleInline = (data['ownerHandle'] ?? '') as String;
-    final currentUser = FirebaseAuth.instance.currentUser;
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Padding(
@@ -513,7 +709,7 @@ class _PostTile extends StatelessWidget {
                       ? Icons.volunteer_activism
                       : Icons.menu_book_outlined,
                   size: 18,
-                  color: const Color(0xFF6B4EFF),
+                  color: Theme.of(context).colorScheme.primary,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -649,10 +845,10 @@ class _FriendAction extends StatelessWidget {
             avatar: const Icon(
               Icons.check_circle,
               size: 16,
-              color: Color(0xFF6B4EFF),
+              color: Color(0xFF795548),
             ),
             label: const Text('Friends'),
-            backgroundColor: const Color(0xFF6B4EFF).withOpacity(0.1),
+            backgroundColor: const Color(0xFF795548).withOpacity(0.1),
             shape: const StadiumBorder(),
           );
         }

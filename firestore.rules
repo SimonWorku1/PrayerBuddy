@@ -1,6 +1,22 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Chats and messages
+    match /chats/{chatId} {
+      // Members only
+      allow read: if isSignedIn() && (request.auth.uid in resource.data.memberIds);
+      allow create: if isSignedIn()
+        && (request.resource.data.memberIds is list)
+        && (request.auth.uid in request.resource.data.memberIds);
+      allow update, delete: if isSignedIn() && (request.auth.uid in resource.data.memberIds);
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds);
+        allow create: if isSignedIn() && (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds);
+        allow update, delete: if false; // Immutable messages
+      }
+    }
     function isSignedIn() {
       return request.auth != null;
     }

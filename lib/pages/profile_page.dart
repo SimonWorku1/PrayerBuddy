@@ -76,7 +76,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
     await db.runTransaction((tx) async {
       final userSnap = await tx.get(userRef);
-      final userData = userSnap.data() as Map<String, dynamic>? ?? {};
+      final userData = userSnap.data() ?? {};
       final currentHandle = (userData['handle'] ?? '') as String;
       final changeCount = (userData['handleChangeCount'] ?? 0) as int;
       final resetAt = userData['handleChangeResetAt'] as Timestamp?;
@@ -141,7 +141,7 @@ class _ProfilePageState extends State<ProfilePage> {
       tx.set(userRef, {
         'handle': newHandle,
         'handleUpdatedAt': FieldValue.serverTimestamp(),
-        'handleChangeResetAt': Timestamp.fromDate(resetAtDt!),
+        'handleChangeResetAt': Timestamp.fromDate(resetAtDt),
         'handleChangeCount': effectiveCount + 1,
       }, SetOptions(merge: true));
     });
@@ -259,7 +259,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     CircleAvatar(
                       radius: 56,
                       backgroundColor: const Color(
-                        0xFF6B4EFF,
+                        0xFF795548,
                       ).withOpacity(0.15),
                       backgroundImage: _photoUrl != null
                           ? NetworkImage(_photoUrl!)
@@ -268,7 +268,7 @@ class _ProfilePageState extends State<ProfilePage> {
                           ? const Icon(
                               Icons.person,
                               size: 56,
-                              color: Color(0xFF6B4EFF),
+                              color: Color(0xFF795548),
                             )
                           : null,
                     ),
@@ -303,7 +303,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       child: Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF6B4EFF),
+                          color: const Color(0xFF795548),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: const Icon(
@@ -416,7 +416,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 child: ElevatedButton(
                   onPressed: _loading ? null : _save,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF6B4EFF),
+                    backgroundColor: const Color(0xFF795548),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(
                       vertical: 16,

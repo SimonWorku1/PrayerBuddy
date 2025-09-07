@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionId": "chats",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "memberIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionId": "posts",
       "queryScope": "COLLECTION",
       "fields": [

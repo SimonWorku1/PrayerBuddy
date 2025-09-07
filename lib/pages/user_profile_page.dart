@@ -41,7 +41,7 @@ class UserProfilePage extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 56,
-                  backgroundColor: const Color(0xFF6B4EFF).withOpacity(0.15),
+                  backgroundColor: const Color(0xFF795548).withOpacity(0.15),
                   backgroundImage: photoUrl != null
                       ? NetworkImage(photoUrl)
                       : null,
@@ -49,7 +49,7 @@ class UserProfilePage extends StatelessWidget {
                       ? const Icon(
                           Icons.person,
                           size: 56,
-                          color: Color(0xFF6B4EFF),
+                          color: Color(0xFF795548),
                         )
                       : null,
                 ),
@@ -59,7 +59,7 @@ class UserProfilePage extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF6B4EFF),
+                    color: Color(0xFF795548),
                   ),
                 ),
                 if (handle.isNotEmpty) ...[
@@ -106,7 +106,7 @@ class _InfoTile extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
       child: ListTile(
-        leading: Icon(icon, color: const Color(0xFF6B4EFF)),
+        leading: Icon(icon, color: const Color(0xFF795548)),
         title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text(value),
       ),

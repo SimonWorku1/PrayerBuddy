@@ -179,7 +179,7 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
           .collection('users')
           .doc(user.uid)
           .get();
-      final data = userDoc.data() as Map<String, dynamic>?;
+      final data = userDoc.data();
       final handle = data != null ? (data['handle'] ?? '') as String : '';
       if (handle.isNotEmpty) {
         final handleRef = FirebaseFirestore.instance
@@ -221,7 +221,7 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
             child: Column(
               children: [
                 ListTile(
-                  leading: const Icon(Icons.logout, color: Color(0xFF6B4EFF)),
+                  leading: const Icon(Icons.logout, color: Color(0xFF795548)),
                   title: const Text('Sign out'),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: _busy

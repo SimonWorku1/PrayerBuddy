@@ -90,7 +90,7 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
           style: TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF8B8B7A),
+            color: Color(0xFF6C5E55),
           ),
         ),
         actions: [
@@ -122,7 +122,7 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
                             top: -2,
                             child: CircleAvatar(
                               radius: 5,
-                              backgroundColor: Color(0xFF6B4EFF),
+                              backgroundColor: Color(0xFF795548),
                             ),
                           )
                         : const SizedBox.shrink();
@@ -267,8 +267,9 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
                                         'status': 'accepted',
                                       });
                                       await batch.commit();
-                                      if (context.mounted)
+                                      if (context.mounted) {
                                         Navigator.pop(context);
+                                      }
                                     },
                                   ),
                                   IconButton(
@@ -281,8 +282,9 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
                                       await reqs[index].reference.update({
                                         'status': 'declined',
                                       });
-                                      if (context.mounted)
+                                      if (context.mounted) {
                                         Navigator.pop(context);
+                                      }
                                     },
                                   ),
                                 ],

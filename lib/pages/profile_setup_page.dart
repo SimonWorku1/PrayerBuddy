@@ -144,7 +144,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       backgroundColor: const Color(0xFFF5F5DC),
       appBar: AppBar(
         title: const Text('Complete Your Profile'),
-        backgroundColor: const Color(0xFF6B4EFF),
+        backgroundColor: const Color(0xFF795548),
         foregroundColor: Colors.white,
         automaticallyImplyLeading: false, // Prevent back button
       ),
@@ -163,7 +163,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF6B4EFF),
+                  color: Color(0xFF795548),
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -301,7 +301,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
               ElevatedButton(
                 onPressed: _isLoading ? null : _saveProfile,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF6B4EFF),
+                  backgroundColor: const Color(0xFF795548),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
@@ -366,7 +366,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                       },
                 child: const Text(
                   'Skip for now',
-                  style: TextStyle(color: Color(0xFF6B4EFF), fontSize: 16),
+                  style: TextStyle(color: Color(0xFF795548), fontSize: 16),
                 ),
               ),
             ],

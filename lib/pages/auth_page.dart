@@ -221,11 +221,11 @@ class _AuthPageState extends State<AuthPage> {
                   width: 120,
                   height: 120,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF6B4EFF),
+                    color: const Color(0xFF795548),
                     borderRadius: BorderRadius.circular(60),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF6B4EFF).withOpacity(0.3),
+                        color: const Color(0xFF795548).withOpacity(0.3),
                         blurRadius: 20,
                         offset: const Offset(0, 10),
                       ),
