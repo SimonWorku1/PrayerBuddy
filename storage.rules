@@ -1,13 +1,6 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Chat images
-    match /chats/{chatId}/{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null
-                   && request.resource.size < 10 * 1024 * 1024 // < 10MB
-                   && request.resource.contentType.matches('image/.+');
-    }
     // Allow each authenticated user to read and write their own profile images
     match /users/{userId}/{allPaths=**} {
       allow read: if request.auth != null;

@@ -50,44 +50,17 @@ class _NewChatPageState extends State<NewChatPage> {
     if (me == null || _selectedUserIds.isEmpty) return;
     final memberIds = <String>{me.uid, ..._selectedUserIds}.toList()..sort();
     final isGroup = memberIds.length > 2;
-
-    // Build a stable memberKey for deduplication
-    final memberKey = memberIds.join('_');
-
-    try {
-      // Prevent chat with only yourself
-      if (memberIds.length <= 1) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('You cannot start a chat with yourself.'),
-          ),
-        );
-        return;
-      }
-      // Use deterministic ID to avoid pre-query blocked by rules
-      final chatDoc = FirebaseFirestore.instance
-          .collection('chats')
-          .doc(memberKey);
-      await chatDoc.set({
-        'memberIds': memberIds,
-        'memberKey': memberKey,
-        'isGroup': isGroup,
-        'title': '',
-        'createdAt': FieldValue.serverTimestamp(),
-        'lastMessageAt': FieldValue.serverTimestamp(),
-        'lastMessageText': '',
-        'lastMessageType': 'text',
-        'lastReadAt': {me.uid: FieldValue.serverTimestamp()},
-      }, SetOptions(merge: true));
-      if (!mounted) return;
-      Navigator.of(context).pop(chatDoc.id);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to create chat: $e')));
-    }
+    // Title: for group, prompt later; for 1:1, resolve other name lazily
+    final chatRef = await FirebaseFirestore.instance.collection('chats').add({
+      'memberIds': memberIds,
+      'isGroup': isGroup,
+      'title': '',
+      'createdAt': FieldValue.serverTimestamp(),
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      'lastMessageText': '',
+    });
+    if (!mounted) return;
+    Navigator.of(context).pop(chatRef.id);
   }
 
   @override
@@ -153,10 +126,6 @@ class _NewChatPageState extends State<NewChatPage> {
         final doc = _searchResults[index];
         final data = doc.data() as Map<String, dynamic>;
         final uid = doc.id;
-        final me = FirebaseAuth.instance.currentUser;
-        if (me != null && uid == me.uid) {
-          return const SizedBox.shrink();
-        }
         final name = (data['name'] ?? 'User') as String;
         final handle = (data['handle'] ?? '') as String;
         final selected = _selectedUserIds.contains(uid);

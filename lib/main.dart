@@ -11,6 +11,7 @@ import 'pages/find_friends_page.dart';
 import 'pages/post_composer_page.dart';
 import 'pages/user_profile_page.dart';
 import 'pages/messages_page.dart';
+import 'pages/chat_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -18,18 +19,7 @@ void main() async {
   // Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Enable testing mode for iOS Simulator to prevent phone auth crashes
-  if (kDebugMode) {
-    try {
-      await FirebaseAuth.instance.setSettings(
-        appVerificationDisabledForTesting: true,
-        phoneNumber: '+15555550100', // Test phone number
-        smsCode: '123456', // Test SMS code
-      );
-    } catch (e) {
-      print('Warning: Could not set testing mode: $e');
-    }
-  }
+  // Removed test phone auth override – real SMS verification will be used
 
   runApp(const PrayerBuddyApp());
 }
@@ -461,17 +451,16 @@ class _FriendsFeed extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return const SizedBox.shrink();
-    final friendsStream = FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .collection('friends')
-        .limit(10)
-        .snapshots();
-    return StreamBuilder<QuerySnapshot>(
-      stream: friendsStream,
+    return FutureBuilder<QuerySnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('friends')
+          .limit(10)
+          .get(),
       builder: (context, snap) {
         if (!snap.hasData) {
-          return const _PostSkeletonList();
+          return const Center(child: CircularProgressIndicator());
         }
         final friendIds = snap.data!.docs.map((d) => d.id).toList();
         if (friendIds.isEmpty) {
@@ -488,17 +477,18 @@ class _FriendsFeed extends StatelessWidget {
           stream: posts,
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
-              return const _PostSkeletonList();
+              return const Center(child: CircularProgressIndicator());
             }
             final docs = snapshot.data!.docs;
             if (docs.isEmpty) {
-              return const Center(child: Text('No posts yet!'));
+              return const Center(child: Text('No posts yet'));
             }
             return ListView.builder(
               itemCount: docs.length,
               itemBuilder: (context, index) {
-                final data = docs[index].data() as Map<String, dynamic>;
-                return _PostTile(data: data);
+                final doc = docs[index];
+                final data = doc.data() as Map<String, dynamic>;
+                return _PostTile(data: {...data, 'id': doc.id});
               },
             );
           },
@@ -522,17 +512,18 @@ class _WorldFeed extends StatelessWidget {
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const _PostSkeletonList();
+          return const Center(child: CircularProgressIndicator());
         }
         final docs = snapshot.data!.docs.toList()..shuffle();
         if (docs.isEmpty) {
-          return const Center(child: Text('No posts yet!'));
+          return const Center(child: Text('No posts yet'));
         }
         return ListView.builder(
           itemCount: docs.length,
           itemBuilder: (context, index) {
-            final data = docs[index].data() as Map<String, dynamic>;
-            return _PostTile(data: data);
+            final doc = docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+            return _PostTile(data: {...data, 'id': doc.id});
           },
         );
       },
@@ -554,133 +545,22 @@ class _AnonymousFeed extends StatelessWidget {
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const _PostSkeletonList();
+          return const Center(child: CircularProgressIndicator());
         }
         final docs = snapshot.data!.docs;
         if (docs.isEmpty) {
-          return const Center(child: Text('No posts yet!'));
+          return const Center(child: Text('No anonymous posts yet'));
         }
         return ListView.builder(
           itemCount: docs.length,
           itemBuilder: (context, index) {
-            final data = docs[index].data() as Map<String, dynamic>;
-            return _PostTile(data: data);
+            final doc = docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+            return _PostTile(data: {...data, 'id': doc.id});
           },
         );
       },
     );
-  }
-}
-
-class _PostSkeletonList extends StatelessWidget {
-  const _PostSkeletonList();
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.builder(
-      itemCount: 6,
-      itemBuilder: (context, index) => const _PostSkeletonTile(),
-    );
-  }
-}
-
-class _PostSkeletonTile extends StatelessWidget {
-  const _PostSkeletonTile();
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            _ShimmerBox(width: 140, height: 14),
-            SizedBox(height: 12),
-            _ShimmerBox(width: double.infinity, height: 12),
-            SizedBox(height: 8),
-            _ShimmerBox(width: double.infinity, height: 12),
-            SizedBox(height: 8),
-            _ShimmerBox(width: 180, height: 12),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ShimmerBox extends StatefulWidget {
-  final double width;
-  final double height;
-  const _ShimmerBox({required this.width, required this.height});
-
-  @override
-  State<_ShimmerBox> createState() => _ShimmerBoxState();
-}
-
-class _ShimmerBoxState extends State<_ShimmerBox>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final baseColor = Colors.grey.shade300;
-    final highlightColor = Colors.grey.shade100;
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return ShaderMask(
-          shaderCallback: (rect) {
-            final width = rect.width;
-            final gradientWidth = width / 2;
-            final dx =
-                (width + gradientWidth) * _controller.value - gradientWidth;
-            return LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [baseColor, highlightColor, baseColor],
-              stops: const [0.35, 0.5, 0.65],
-              transform: GradientTranslation(dx),
-            ).createShader(rect);
-          },
-          blendMode: BlendMode.srcATop,
-          child: Container(
-            width: widget.width,
-            height: widget.height,
-            decoration: BoxDecoration(
-              color: baseColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class GradientTranslation extends GradientTransform {
-  final double dx;
-  const GradientTranslation(this.dx);
-
-  @override
-  Matrix4 transform(Rect bounds, {TextDirection? textDirection}) {
-    return Matrix4.identity()..translate(dx);
   }
 }
 
@@ -813,8 +693,373 @@ class _PostTile extends StatelessWidget {
               ),
             const SizedBox(height: 6),
             Text((data['content'] ?? '') as String),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () {
+                    final postId =
+                        (data['id'] ?? (data['__id'] ?? '')) as String;
+                    final post = {...data, 'id': postId};
+                    if (postId.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Post unavailable')),
+                      );
+                      return;
+                    }
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(16),
+                        ),
+                      ),
+                      builder: (ctx) => _ReplySheet(post: post),
+                    );
+                  },
+                  icon: const Icon(Icons.reply, size: 16),
+                  label: const Text('Reply', style: TextStyle(fontSize: 12)),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () {
+                    final postId =
+                        (data['id'] ?? (data['__id'] ?? '')) as String;
+                    final post = {...data, 'id': postId};
+                    if (postId.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Post unavailable')),
+                      );
+                      return;
+                    }
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      shape: const RoundedRectangleBorder(
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(16),
+                        ),
+                      ),
+                      builder: (ctx) =>
+                          _CommentsSheet(postId: postId, post: post),
+                    );
+                  },
+                  child: const Text(
+                    'Show replies',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ReplySheet extends StatefulWidget {
+  final Map<String, dynamic> post;
+  const _ReplySheet({required this.post});
+
+  @override
+  State<_ReplySheet> createState() => _ReplySheetState();
+}
+
+class _ReplySheetState extends State<_ReplySheet> {
+  final TextEditingController _controller = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendComment() async {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) return;
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _sending = true);
+    try {
+      final postId = (widget.post['id'] ?? '') as String;
+      if (postId.isEmpty) {
+        throw Exception('postId missing');
+      }
+      await FirebaseFirestore.instance
+          .collection('posts')
+          .doc(postId)
+          .collection('comments')
+          .add({
+            'authorId': me.uid,
+            'text': text,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+      if (mounted) Navigator.pop(context);
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _sendDm() async {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) return;
+    final ownerId = (widget.post['ownerId'] ?? '') as String;
+    if (ownerId.isEmpty || ownerId == me.uid) return;
+    final memberIds = [me.uid, ownerId]..sort();
+    final memberKey = memberIds.join('_');
+    final chatDoc = FirebaseFirestore.instance
+        .collection('chats')
+        .doc(memberKey);
+    await chatDoc.set({
+      'memberIds': memberIds,
+      'memberKey': memberKey,
+      'isGroup': false,
+      'title': '',
+      'createdAt': FieldValue.serverTimestamp(),
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      'lastMessageText': '',
+      'lastMessageType': 'text',
+    }, SetOptions(merge: true));
+
+    final replyText = _controller.text.trim();
+    final msgRef = chatDoc.collection('messages').doc();
+    await msgRef.set({
+      'senderId': me.uid,
+      'type': 'post_reply',
+      'text': replyText,
+      'post': {
+        'id': widget.post['id'] ?? '',
+        'ownerId': widget.post['ownerId'] ?? '',
+        'title': widget.post['title'] ?? '',
+        'content': widget.post['content'] ?? '',
+        'visibility': widget.post['visibility'] ?? 'public',
+      },
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    await chatDoc.set({
+      'lastMessageText': replyText.isNotEmpty
+          ? replyText
+          : 'Replied to your post',
+      'lastMessageAt': FieldValue.serverTimestamp(),
+      'lastMessageSenderId': me.uid,
+      'lastMessageType': 'post_reply',
+    }, SetOptions(merge: true));
+    if (!mounted) return;
+    Navigator.pop(context);
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => ChatPage(chatId: chatDoc.id)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final title = (widget.post['title'] ?? '') as String;
+    final content = (widget.post['content'] ?? '') as String;
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 16,
+        right: 16,
+        top: 16,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Reply to post', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (title.isNotEmpty)
+                  Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                if (title.isNotEmpty) const SizedBox(height: 4),
+                Text(content, maxLines: 3, overflow: TextOverflow.ellipsis),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            decoration: const InputDecoration(hintText: 'Write a reply…'),
+            minLines: 1,
+            maxLines: 5,
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              ElevatedButton.icon(
+                onPressed: _sending ? null : _sendComment,
+                icon: const Icon(Icons.forum, size: 16),
+                label: const Text('Comment'),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: _sending ? null : _sendDm,
+                icon: const Icon(Icons.mail_outline, size: 16),
+                label: const Text('DM privately'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
+  }
+}
+
+class _CommentsSheet extends StatelessWidget {
+  final String postId;
+  final Map<String, dynamic> post;
+  const _CommentsSheet({required this.postId, required this.post});
+
+  @override
+  Widget build(BuildContext context) {
+    final stream = FirebaseFirestore.instance
+        .collection('posts')
+        .doc(postId)
+        .collection('comments')
+        .orderBy('createdAt', descending: true)
+        .limit(100)
+        .snapshots();
+    final title = (post['title'] ?? '') as String;
+    final content = (post['content'] ?? '') as String;
+    final ownerId = (post['ownerId'] ?? '') as String;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (title.isNotEmpty)
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                if (title.isNotEmpty) const SizedBox(height: 6),
+                Text(content),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: stream,
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return SizedBox(
+                    height: 220,
+                    child: Center(child: Text('Error: ${snapshot.error}')),
+                  );
+                }
+                if (!snapshot.hasData) {
+                  return const SizedBox(
+                    height: 220,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+                final docs = snapshot.data!.docs;
+                if (docs.isEmpty) {
+                  return const SizedBox(
+                    height: 220,
+                    child: Center(child: Text('No comments on this post')),
+                  );
+                }
+                return ListView.builder(
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final c = docs[index].data() as Map<String, dynamic>;
+                    final text = (c['text'] ?? '') as String;
+                    final authorId = (c['authorId'] ?? '') as String;
+                    return ListTile(
+                      leading: const CircleAvatar(child: Icon(Icons.person)),
+                      title: FutureBuilder<DocumentSnapshot>(
+                        future: FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(authorId)
+                            .get(),
+                        builder: (context, snap) {
+                          final name = snap.hasData && snap.data!.exists
+                              ? ((snap.data!.data()
+                                            as Map<String, dynamic>)['name'] ??
+                                        'User')
+                                    as String
+                              : 'User';
+                          final isAuthor = ownerId == authorId;
+                          return Row(
+                            children: [
+                              Text(name),
+                              if (isAuthor) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.brown.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Text(
+                                    'author',
+                                    style: TextStyle(fontSize: 10),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      ),
+                      subtitle: Text(text),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -841,18 +1086,28 @@ class _FriendAction extends StatelessWidget {
       builder: (context, snap) {
         final isFriend = snap.hasData && snap.data!.exists;
         if (isFriend) {
-          return Chip(
-            avatar: const Icon(
-              Icons.check_circle,
-              size: 16,
-              color: Color(0xFF795548),
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF795548).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
             ),
-            label: const Text('Friends'),
-            backgroundColor: const Color(0xFF795548).withOpacity(0.1),
-            shape: const StadiumBorder(),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Icon(Icons.check_circle, size: 14, color: Color(0xFF795548)),
+                SizedBox(width: 4),
+                Text('Friends', style: TextStyle(fontSize: 12)),
+              ],
+            ),
           );
         }
         return TextButton.icon(
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
           onPressed: () async {
             final uid = currentUser.uid;
             await FirebaseFirestore.instance
@@ -870,8 +1125,8 @@ class _FriendAction extends StatelessWidget {
               ).showSnackBar(const SnackBar(content: Text('Request sent')));
             }
           },
-          icon: const Icon(Icons.person_add_alt_1, size: 18),
-          label: const Text('Add'),
+          icon: const Icon(Icons.person_add_alt_1, size: 16),
+          label: const Text('Add', style: TextStyle(fontSize: 12)),
         );
       },
     );
