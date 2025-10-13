@@ -8,6 +8,7 @@ import '../firebase_options.dart';
 import 'package:image_picker/image_picker.dart';
 import 'settings_page.dart';
 
+// Profile screen where a user can view and edit their profile.
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -16,21 +17,25 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
+  // Controllers and UI state used by the profile form.
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _verseController = TextEditingController();
+  String _bibleVersion = 'NIV';
   final TextEditingController _songController = TextEditingController();
   final TextEditingController _bioController = TextEditingController();
   final TextEditingController _handleController = TextEditingController();
   bool _loading = false;
   String? _photoUrl;
 
+  // Load the user's profile data once when the widget is created.
   @override
   void initState() {
     super.initState();
     _loadProfile();
   }
 
+  // Fetch the Firestore user document and populate the form controllers.
   Future<void> _loadProfile() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -44,6 +49,8 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() {
       _nameController.text = (data['name'] ?? '') as String;
       _verseController.text = (data['favoriteVerse'] ?? '') as String;
+      final favVer = data['favoriteVerseVersion'];
+      _bibleVersion = (favVer is String && favVer.isNotEmpty) ? favVer : 'NIV';
       _songController.text = (data['favoriteSong'] ?? '') as String;
       _bioController.text = (data['bio'] ?? '') as String;
       _handleController.text = (data['handle'] ?? '') as String;
@@ -51,10 +58,12 @@ class _ProfilePageState extends State<ProfilePage> {
     });
   }
 
+  // Normalize @handle by trimming spaces and lowercasing.
   String _sanitizeHandle(String raw) {
     return raw.trim().toLowerCase();
   }
 
+  // If the @handle changed, reserve it and update counts atomically.
   Future<void> _claimHandleIfChanged() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -147,6 +156,7 @@ class _ProfilePageState extends State<ProfilePage> {
     });
   }
 
+  // Pick/capture a profile photo, upload to Storage, save URL to Firestore.
   Future<void> _pickImage(ImageSource source) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -190,6 +200,7 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // Validate form, reserve handle, and persist profile to Firestore.
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     final user = FirebaseAuth.instance.currentUser;
@@ -202,6 +213,7 @@ class _ProfilePageState extends State<ProfilePage> {
       await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
         'name': _nameController.text.trim(),
         'favoriteVerse': _verseController.text.trim(),
+        'favoriteVerseVersion': _bibleVersion,
         'favoriteSong': _songController.text.trim(),
         'bio': _bioController.text.trim(),
         'updatedAt': FieldValue.serverTimestamp(),
@@ -226,10 +238,12 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // Build the UI for the Profile screen.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5DC),
+      // App bar with title and a quick link to Settings.
       appBar: AppBar(
         title: const Text('Profile'),
         backgroundColor: Colors.transparent,
@@ -252,6 +266,7 @@ class _ProfilePageState extends State<ProfilePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              // Profile picture with edit menu to choose camera or gallery.
               Center(
                 child: Stack(
                   alignment: Alignment.bottomRight,
@@ -317,6 +332,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
               const SizedBox(height: 24),
+              // Handle (@username) field; locks input if change limit reached.
               StreamBuilder<DocumentSnapshot>(
                 stream: FirebaseAuth.instance.currentUser == null
                     ? null
@@ -368,6 +384,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 },
               ),
               const SizedBox(height: 16),
+              // Full name input.
               TextFormField(
                 controller: _nameController,
                 decoration: const InputDecoration(
@@ -380,16 +397,55 @@ class _ProfilePageState extends State<ProfilePage> {
                     : null,
               ),
               const SizedBox(height: 16),
+              // Favorite verse input with version dropdown and live formatter.
               TextFormField(
                 controller: _verseController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Favorite Bible Verse',
                   hintText: 'e.g. John 3:16',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.menu_book_outlined),
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.menu_book_outlined),
+                  suffixIcon: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _bibleVersion,
+                      items: const [
+                        DropdownMenuItem(value: 'NIV', child: Text('NIV')),
+                        DropdownMenuItem(value: 'ESV', child: Text('ESV')),
+                        DropdownMenuItem(value: 'KJV', child: Text('KJV')),
+                        DropdownMenuItem(value: 'NKJV', child: Text('NKJV')),
+                        DropdownMenuItem(value: 'NLT', child: Text('NLT')),
+                      ],
+                      onChanged: (v) =>
+                          setState(() => _bibleVersion = v ?? 'NIV'),
+                    ),
+                  ),
                 ),
+                onChanged: (value) {
+                  final trimmed = value.trim();
+                  // Support ranges/lists in verse segment: "John 3 16-18,20" -> "John 3:16-18,20"
+                  final match = RegExp(
+                    r'^(.*?\s+)(\d+)[^\d]+(.+)$',
+                  ).firstMatch(trimmed);
+                  if (match != null) {
+                    final book = match.group(1)!;
+                    final ch = match.group(2)!;
+                    String rest = match.group(3)!.trim();
+                    rest = rest.replaceAll(RegExp(r'\s*-\s*'), '-');
+                    rest = rest.replaceAll(RegExp(r'\s*,\s*'), ',');
+                    final formatted = '$book$ch:$rest';
+                    if (formatted != value) {
+                      _verseController.value = TextEditingValue(
+                        text: formatted,
+                        selection: TextSelection.collapsed(
+                          offset: formatted.length,
+                        ),
+                      );
+                    }
+                  }
+                },
               ),
               const SizedBox(height: 16),
+              // Favorite worship song input.
               TextFormField(
                 controller: _songController,
                 decoration: const InputDecoration(
@@ -400,6 +456,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
               const SizedBox(height: 16),
+              // Short bio input.
               TextFormField(
                 controller: _bioController,
                 maxLines: 4,
@@ -411,6 +468,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
               const SizedBox(height: 24),
+              // Save changes; disabled and shows spinner when saving.
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(

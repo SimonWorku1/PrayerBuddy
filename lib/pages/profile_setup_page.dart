@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// One-time profile setup screen shown after authentication.
 class ProfileSetupPage extends StatefulWidget {
   final User user;
 
@@ -12,6 +13,7 @@ class ProfileSetupPage extends StatefulWidget {
 }
 
 class _ProfileSetupPageState extends State<ProfileSetupPage> {
+  // Form state and input controllers for required/optional fields.
   final _formKey = GlobalKey<FormState>();
   final _handleController = TextEditingController();
   final _nameController = TextEditingController();
@@ -22,7 +24,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
   @override
   void initState() {
     super.initState();
-    // Pre-fill information based on how user signed up
+    // Pre-fill email/phone if available from the auth provider.
     if (widget.user.email != null && widget.user.email!.isNotEmpty) {
       _emailController.text = widget.user.email!;
     }
@@ -43,8 +45,10 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     super.dispose();
   }
 
+  // Normalize @handle by trimming and lowercasing for consistency.
   String _sanitizeHandle(String raw) => raw.trim().toLowerCase();
 
+  // Reserve the chosen @handle and write basic fields in a single transaction.
   Future<void> _claimHandleOnSignup() async {
     final db = FirebaseFirestore.instance;
     final user = widget.user;
@@ -82,6 +86,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     });
   }
 
+  // Validate inputs, reserve handle, persist the profile, and navigate onward.
   Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -138,6 +143,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     }
   }
 
+  // Build the UI for first-time profile setup.
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -286,7 +292,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
                   if (value != null && value.trim().isNotEmpty) {
                     // Basic email validation
                     if (!RegExp(
-                      r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}\$',
+                      r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
                     ).hasMatch(value.trim())) {
                       return 'Please enter a valid email address';
                     }

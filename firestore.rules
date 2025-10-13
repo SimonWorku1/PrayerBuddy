@@ -5,6 +5,36 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Chats
+    match /chats/{chatId} {
+      // Read allowed only to chat members
+      allow read: if isSignedIn() &&
+        (request.auth.uid in resource.data.memberIds);
+
+      // Create allowed if the requester is included in memberIds on create
+      allow create: if isSignedIn() &&
+        (request.auth.uid in request.resource.data.memberIds);
+
+      // Update/Delete allowed only to existing chat members
+      allow update, delete: if isSignedIn() &&
+        (request.auth.uid in resource.data.memberIds);
+
+      // Messages subcollection
+      match /messages/{messageId} {
+        // Read allowed to chat members
+        allow read: if isSignedIn() &&
+          (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds);
+
+        // Create allowed if sender is the authed user and is a chat member
+        allow create: if isSignedIn() &&
+          request.resource.data.senderId == request.auth.uid &&
+          (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds);
+
+        // Updates/deletes to messages are not allowed (immutable)
+        allow update, delete: if false;
+      }
+    }
+
     function canChangeHandle(uid) {
       // A user may change handles at most 3 times within a 30-day window.
       // Window anchor and count are stored on users/{uid}.
@@ -73,6 +103,29 @@ service cloud.firestore {
         && canChangeHandle(request.auth.uid);
       allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
       allow update: if false;
+    }
+
+    // WebRTC signaling: rooms and peer connections
+    match /calls/{roomId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
+
+      match /participants/{uid} {
+        allow read, create, update, delete: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      match /connections/{connId} {
+        allow read, create, update, delete: if isSignedIn();
+
+        match /offerCandidates/{candId} {
+          allow read, create: if isSignedIn();
+          allow update, delete: if false;
+        }
+        match /answerCandidates/{candId} {
+          allow read, create: if isSignedIn();
+          allow update, delete: if false;
+        }
+      }
     }
   }
 }

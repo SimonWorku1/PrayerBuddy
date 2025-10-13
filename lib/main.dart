@@ -12,6 +12,7 @@ import 'pages/post_composer_page.dart';
 import 'pages/user_profile_page.dart';
 import 'pages/messages_page.dart';
 import 'pages/chat_page.dart';
+import 'pages/group_call_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -118,6 +119,7 @@ class PrayerBuddyApp extends StatelessWidget {
       routes: {
         '/home': (context) => const PrayerBuddyHomePage(),
         '/auth': (context) => const AuthPage(),
+        '/group': (context) => const GroupCallPage(),
       },
     );
   }
@@ -256,7 +258,7 @@ class _PrayerBuddyHomePageState extends State<PrayerBuddyHomePage> {
           children: [
             _buildNavItem(0, Icons.home_outlined, Icons.home, 'Home'),
             _buildNavItem(1, Icons.group_outlined, Icons.group, 'Friends'),
-            _buildCenterAddButton(),
+            _buildCenterJoinButton(),
             _buildNavItem(3, Icons.mail_outline, Icons.mail, 'Messages'),
             _buildNavItem(4, Icons.person_outline, Icons.person, 'Profile'),
           ],
@@ -265,12 +267,12 @@ class _PrayerBuddyHomePageState extends State<PrayerBuddyHomePage> {
     );
   }
 
-  Widget _buildCenterAddButton() {
+  Widget _buildCenterJoinButton() {
     return GestureDetector(
       onTap: () async {
         await Navigator.of(
           context,
-        ).push(MaterialPageRoute(builder: (_) => const PostComposerPage()));
+        ).push(MaterialPageRoute(builder: (_) => const GroupCallPage()));
       },
       child: Container(
         decoration: const BoxDecoration(
@@ -278,7 +280,7 @@ class _PrayerBuddyHomePageState extends State<PrayerBuddyHomePage> {
           color: Color(0xFF795548),
         ),
         padding: const EdgeInsets.all(8),
-        child: const Icon(Icons.add, color: Colors.white, size: 30),
+        child: const Icon(Icons.group, color: Colors.white, size: 30),
       ),
     );
   }
@@ -370,6 +372,16 @@ class HomeFeedPage extends StatelessWidget {
         ],
       ),
       body: const _FeedSwitcher(),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          await Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const PostComposerPage()));
+        },
+        backgroundColor: const Color(0xFF795548),
+        foregroundColor: Colors.white,
+        child: const Icon(Icons.add),
+      ),
     );
   }
 }

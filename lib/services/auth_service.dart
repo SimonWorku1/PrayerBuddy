@@ -26,8 +26,8 @@ class AuthService {
   // Auth state changes stream
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  // Google Sign In - handles both new and existing users
-  Future<UserCredential> signInWithGoogle() async {
+  // Google Sign In - supports explicit signup vs signin flows
+  Future<UserCredential> signInWithGoogle({bool isSignup = false}) async {
     try {
       // Sign out from Google first to force account selection
       await _googleSignIn.signOut();
@@ -37,6 +37,21 @@ class AuthService {
 
       if (googleUser == null) {
         throw Exception('Google Sign In was cancelled by the user.');
+      }
+
+      // If this is a signup attempt, proactively check if an account already exists
+      if (isSignup) {
+        try {
+          final methods = await _auth.fetchSignInMethodsForEmail(
+            googleUser.email,
+          );
+          if (methods.isNotEmpty) {
+            throw Exception('An account with this email already exists.');
+          }
+        } catch (e) {
+          // Surface a clean error and stop
+          rethrow;
+        }
       }
 
       // Get the authentication tokens
@@ -59,7 +74,7 @@ class AuthService {
             .get();
 
         if (!userDoc.exists) {
-          // This is a new user, check for duplicate email in our database
+          // This is a new user, check for duplicate email in our database (defensive)
           final emailExists = await isEmailExists(googleUser.email);
           if (emailExists) {
             // Sign out and throw error
@@ -277,20 +292,125 @@ class AuthService {
     }
   }
 
-  // Check if email already exists in database
-  Future<bool> isEmailExists(String email) async {
+  // Check if email already exists in database (optionally exclude a user)
+  Future<bool> isEmailExists(String email, {String? excludeUserId}) async {
     try {
       final cleanEmail = email.trim().toLowerCase();
       final querySnapshot = await FirebaseFirestore.instance
           .collection('users')
           .where('email', isEqualTo: cleanEmail)
-          .limit(1)
           .get();
 
-      return querySnapshot.docs.isNotEmpty;
+      for (final doc in querySnapshot.docs) {
+        if (excludeUserId != null && doc.id == excludeUserId) {
+          continue;
+        }
+        return true;
+      }
+      return false;
     } catch (e) {
       print('Error checking email: $e');
       return false;
+    }
+  }
+
+  // Check if user account is deleted
+  Future<bool> isAccountDeleted(String userId) async {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+
+      return userDoc.exists && userDoc.data()?['isDeleted'] == true;
+    } catch (e) {
+      print('Error checking if account is deleted: $e');
+      return false;
+    }
+  }
+
+  // Check if user account is deactivated
+  Future<bool> isAccountDeactivated(String userId) async {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+
+      return userDoc.exists && userDoc.data()?['isDeactivated'] == true;
+    } catch (e) {
+      print('Error checking if account is deactivated: $e');
+      return false;
+    }
+  }
+
+  // Handle account deletion
+  Future<void> handleAccountDeletion(String userId) async {
+    try {
+      // Delete user's posts
+      final postsQuery = await FirebaseFirestore.instance
+          .collection('posts')
+          .where('userId', isEqualTo: userId)
+          .get();
+      for (final doc in postsQuery.docs) {
+        await doc.reference.delete();
+      }
+
+      // Delete user's profile
+      await FirebaseFirestore.instance.collection('users').doc(userId).delete();
+
+      // Remove user from friends' lists
+      final friendsQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .where('friends', arrayContains: userId)
+          .get();
+      for (final doc in friendsQuery.docs) {
+        await doc.reference.update({
+          'friends': FieldValue.arrayRemove([userId]),
+        });
+      }
+
+      print('Account deletion handled successfully for user: $userId');
+    } catch (e) {
+      print('Error handling account deletion: $e');
+    }
+  }
+
+  // Handle account deactivation
+  Future<void> handleAccountDeactivation(String userId) async {
+    try {
+      // Update user document to set isDeactivated to true
+      await FirebaseFirestore.instance.collection('users').doc(userId).update({
+        'isDeactivated': true,
+      });
+
+      print('Account deactivation handled successfully for user: $userId');
+    } catch (e) {
+      print('Error handling account deactivation: $e');
+    }
+  }
+
+  // Delete accounts not authenticated with email or phone number
+  Future<void> deleteUnauthenticatedAccounts() async {
+    try {
+      final usersQuery = await FirebaseFirestore.instance
+          .collection('users')
+          .get();
+
+      for (final doc in usersQuery.docs) {
+        final userData = doc.data();
+        final email = userData['email'] as String?;
+        final phoneNumber = userData['phone'] as String?;
+
+        if ((email == null || email.isEmpty) &&
+            (phoneNumber == null || phoneNumber.isEmpty)) {
+          // Delete the account if it has no authenticated email or phone number
+          await doc.reference.delete();
+          print('Deleted unauthenticated account: ${doc.id}');
+        }
+      }
+    } catch (e) {
+      print('Error deleting unauthenticated accounts: $e');
     }
   }
 

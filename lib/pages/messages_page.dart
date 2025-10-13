@@ -32,9 +32,16 @@ class MessagesPage extends StatelessWidget {
             tooltip: 'New chat',
             icon: const Icon(Icons.add),
             onPressed: () async {
-              await Navigator.of(
+              final result = await Navigator.of(
                 context,
               ).push(MaterialPageRoute(builder: (_) => const NewChatPage()));
+              if (result is String && result.isNotEmpty) {
+                // Navigate directly to the newly created (or existing) chat
+                // ignore: use_build_context_synchronously
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => ChatPage(chatId: result)),
+                );
+              }
             },
           ),
         ],
@@ -54,29 +61,89 @@ class MessagesPage extends StatelessWidget {
             itemBuilder: (context, index) {
               final chat = docs[index].data() as Map<String, dynamic>;
               final chatId = docs[index].id;
-              final title = (chat['title'] ?? '') as String;
               final lastText = (chat['lastMessageText'] ?? '') as String;
               final isGroup = (chat['isGroup'] ?? false) as bool;
-              return ListTile(
-                leading: CircleAvatar(
-                  child: Icon(isGroup ? Icons.groups : Icons.person),
-                ),
-                title: Text(title.isNotEmpty ? title : 'Conversation'),
-                subtitle: Text(
-                  lastText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => ChatPage(chatId: chatId)),
-                  );
+
+              return Dismissible(
+                key: Key(chatId),
+                direction: DismissDirection.endToStart,
+                onDismissed: (direction) {
+                  // Handle chat deletion
                 },
+                background: Container(
+                  color: Colors.red,
+                  alignment: Alignment.centerRight,
+                  padding: EdgeInsets.symmetric(horizontal: 20),
+                  child: Icon(Icons.delete, color: Colors.white),
+                ),
+                child: Column(
+                  children: [
+                    FutureBuilder<String>(
+                      future: getChatTitleAndValidate(chat, user.uid, chatId),
+                      builder: (context, snapshot) {
+                        final title = snapshot.data ?? 'User';
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundImage: chat['photoUrl'] != null
+                                ? NetworkImage(chat['photoUrl'])
+                                : null,
+                            child: chat['photoUrl'] == null
+                                ? const Icon(Icons.person)
+                                : null,
+                          ),
+                          title: Text(title),
+                          subtitle: Text(
+                            lastText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => ChatPage(chatId: chatId),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                    Divider(),
+                  ],
+                ),
               );
             },
           );
         },
       ),
     );
+  }
+
+  // Helper function to get chat title and delete chat if user doesn't exist
+  Future<String> getChatTitleAndValidate(
+    Map<String, dynamic> chat,
+    String currentUserId,
+    String chatId,
+  ) async {
+    if (chat['isGroup'] == true) {
+      return chat['title'] ?? 'Group Conversation';
+    }
+    final memberIds = List<String>.from(chat['memberIds'] ?? []);
+    final otherMemberId = memberIds.firstWhere(
+      (id) => id != currentUserId,
+      orElse: () => '',
+    );
+    if (otherMemberId.isEmpty) return 'User';
+
+    // Fetch the user's name from Firestore
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(otherMemberId)
+        .get();
+    if (!userDoc.exists) {
+      // Delete the chat if the user doesn't exist
+      await FirebaseFirestore.instance.collection('chats').doc(chatId).delete();
+      return 'User';
+    }
+    return userDoc.data()?['name'] ?? 'User';
   }
 }

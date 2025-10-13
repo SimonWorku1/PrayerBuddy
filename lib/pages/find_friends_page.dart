@@ -356,8 +356,13 @@ class _FindFriendsPageState extends State<FindFriendsPage> {
                                       as Map<String, dynamic>;
                               final uid = _results[index].id;
                               return ListTile(
-                                leading: const CircleAvatar(
-                                  child: Icon(Icons.person),
+                                leading: CircleAvatar(
+                                  backgroundImage: data['photoUrl'] != null
+                                      ? NetworkImage(data['photoUrl'])
+                                      : null,
+                                  child: data['photoUrl'] == null
+                                      ? const Icon(Icons.person)
+                                      : null,
                                 ),
                                 title: Text(data['name'] ?? 'Unknown'),
                                 subtitle: Text(

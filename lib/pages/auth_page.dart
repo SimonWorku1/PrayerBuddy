@@ -16,10 +16,10 @@ class _AuthPageState extends State<AuthPage> {
   final _authService = AuthService();
 
   AuthMethod _selectedMethod = AuthMethod.none;
+  AuthMode _mode = AuthMode.landing; // landing | signup | signin
   bool _isLoading = false;
   String _errorMessage = '';
   bool _phoneCodeSent = false;
-  String _verificationId = '';
   String _selectedCountry = 'US';
   String _formattedPhoneNumber = '';
 
@@ -39,9 +39,31 @@ class _AuthPageState extends State<AuthPage> {
     });
   }
 
+  void _goToSignup() {
+    setState(() {
+      _mode = AuthMode.signup;
+      _selectedMethod = AuthMethod.none;
+      _errorMessage = '';
+      _phoneCodeSent = false;
+    });
+  }
+
+  void _goToSignin() {
+    setState(() {
+      _mode = AuthMode.signin;
+      _selectedMethod = AuthMethod.none;
+      _errorMessage = '';
+      _phoneCodeSent = false;
+    });
+  }
+
   void _goBack() {
     setState(() {
-      _selectedMethod = AuthMethod.none;
+      if (_selectedMethod != AuthMethod.none) {
+        _selectedMethod = AuthMethod.none;
+      } else {
+        _mode = AuthMode.landing;
+      }
       _errorMessage = '';
       _phoneCodeSent = false;
       _formattedPhoneNumber = '';
@@ -144,11 +166,25 @@ class _AuthPageState extends State<AuthPage> {
           _selectedCountry,
         );
 
+        // If this is a signup attempt, proactively check for duplicates
+        if (_mode == AuthMode.signup) {
+          final exists = await _authService.isPhoneNumberExists(
+            cleanPhoneNumber,
+          );
+          if (exists) {
+            setState(() {
+              _isLoading = false;
+              _errorMessage =
+                  'An account with this phone number already exists.';
+            });
+            return;
+          }
+        }
+
         await _authService.verifyPhoneNumber(
           phoneNumber: cleanPhoneNumber,
           onCodeSent: (String verificationId) {
             setState(() {
-              _verificationId = verificationId;
               _phoneCodeSent = true;
               _isLoading = false;
             });
@@ -190,7 +226,7 @@ class _AuthPageState extends State<AuthPage> {
     });
 
     try {
-      await _authService.signInWithGoogle();
+      await _authService.signInWithGoogle(isSignup: _mode == AuthMode.signup);
       if (mounted) {
         Navigator.of(context).pushNamedAndRemoveUntil('/home', (r) => false);
       }
@@ -239,30 +275,87 @@ class _AuthPageState extends State<AuthPage> {
                 ),
                 const SizedBox(height: 32),
 
-                // Welcome Text
-                Text(
-                  'Welcome to PrayerBuddy',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF8B8B7A),
+                if (_mode == AuthMode.landing) ...[
+                  // Landing: Sign up / Sign in buttons
+                  Column(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _goToSignup,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF795548),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Sign up',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _goToSignin,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF795548),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Sign in',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Choose how you\'d like to sign in',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: const Color(0xFF8B8B7A).withOpacity(0.8),
+                ] else ...[
+                  // Welcome Text
+                  Text(
+                    _mode == AuthMode.signup
+                        ? 'Create your account'
+                        : 'Welcome back',
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF8B8B7A),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 40),
+                  const SizedBox(height: 8),
+                  Text(
+                    _selectedMethod == AuthMethod.none
+                        ? (_mode == AuthMode.signup
+                              ? 'Choose how you\'d like to sign up'
+                              : 'Choose how you\'d like to sign in')
+                        : '',
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: const Color(0xFF8B8B7A).withOpacity(0.8),
+                    ),
+                  ),
+                  const SizedBox(height: 40),
 
-                // Show different content based on selected method
-                if (_selectedMethod == AuthMethod.none) ...[
-                  _buildMethodSelection(),
-                ] else if (_selectedMethod == AuthMethod.phone) ...[
-                  _buildPhoneAuth(),
-                ] else if (_selectedMethod == AuthMethod.google) ...[
-                  _buildGoogleAuth(),
+                  // Show different content based on selected method
+                  if (_selectedMethod == AuthMethod.none) ...[
+                    _buildMethodSelection(),
+                  ] else if (_selectedMethod == AuthMethod.phone) ...[
+                    _buildPhoneAuth(),
+                  ] else if (_selectedMethod == AuthMethod.google) ...[
+                    _buildGoogleAuth(),
+                  ],
                 ],
               ],
             ),
@@ -291,8 +384,12 @@ class _AuthPageState extends State<AuthPage> {
           // Phone Authentication Button
           _buildAuthMethodButton(
             icon: Icons.phone_android,
-            title: 'Continue with Phone',
-            subtitle: 'Sign in with your phone number',
+            title: _mode == AuthMode.signup
+                ? 'Sign up with Phone'
+                : 'Sign in with Phone',
+            subtitle: _mode == AuthMode.signup
+                ? 'Create an account using your phone number'
+                : 'Access your account using your phone number',
             onTap: () => _selectMethod(AuthMethod.phone),
             color: const Color(0xFF4CAF50),
           ),
@@ -301,8 +398,12 @@ class _AuthPageState extends State<AuthPage> {
           // Google Authentication Button
           _buildAuthMethodButton(
             icon: Icons.g_mobiledata,
-            title: 'Continue with Google',
-            subtitle: 'Sign in with your Google account',
+            title: _mode == AuthMode.signup
+                ? 'Sign up with Google'
+                : 'Sign in with Google',
+            subtitle: _mode == AuthMode.signup
+                ? 'Create an account using Google'
+                : 'Access your account using Google',
             onTap: () => _selectMethod(AuthMethod.google),
             color: const Color(0xFFDB4437),
           ),
@@ -735,3 +836,5 @@ class _AuthPageState extends State<AuthPage> {
 }
 
 enum AuthMethod { none, phone, google }
+
+enum AuthMode { landing, signup, signin }

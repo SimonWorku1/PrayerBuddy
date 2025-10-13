@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
+import '../services/auth_service.dart';
 
 class AccountActionsPage extends StatefulWidget {
   const AccountActionsPage({super.key});
@@ -12,6 +13,7 @@ class AccountActionsPage extends StatefulWidget {
 
 class _AccountActionsPageState extends State<AccountActionsPage> {
   bool _busy = false;
+  final _authService = AuthService();
 
   Future<bool> _reauthenticateWithSms() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -205,6 +207,211 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
     }
   }
 
+  Future<void> _linkEmail() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final controller = TextEditingController(text: user.email ?? '');
+    final passwordController = TextEditingController();
+    final email = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add email to account'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(labelText: 'Email'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Set password (for email login)',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (email == null || email.isEmpty) return;
+
+    setState(() => _busy = true);
+    try {
+      final exists = await _authService.isEmailExists(
+        email,
+        excludeUserId: user.uid,
+      );
+      if (exists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That email is already in use.')),
+        );
+        return;
+      }
+
+      final cred = EmailAuthProvider.credential(
+        email: email,
+        password: passwordController.text.trim().isEmpty
+            ? 'TempPass#${DateTime.now().millisecondsSinceEpoch}'
+            : passwordController.text.trim(),
+      );
+
+      await user.linkWithCredential(cred).then((value) => value).catchError((
+        e,
+      ) async {
+        try {
+          await user.updateEmail(email);
+          // Return a dummy credential-like object by reloading and composing
+          await user.reload();
+          return await user.reauthenticateWithCredential(cred);
+        } catch (_) {
+          rethrow;
+        }
+      });
+
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'email': email,
+      }, SetOptions(merge: true));
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Email added to your account.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to add email: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _linkPhone() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    String input = '';
+    final phone = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add phone number'),
+        content: TextField(
+          keyboardType: TextInputType.phone,
+          decoration: const InputDecoration(
+            labelText: 'Phone number e.g. +15551234567',
+          ),
+          onChanged: (v) => input = v.trim(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, input),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (phone == null || phone.isEmpty) return;
+
+    setState(() => _busy = true);
+    try {
+      final exists = await _authService.isPhoneNumberExists(
+        phone,
+        excludeUserId: user.uid,
+      );
+      if (exists) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That phone number is already in use.')),
+        );
+        return;
+      }
+
+      await FirebaseAuth.instance.verifyPhoneNumber(
+        phoneNumber: phone,
+        verificationCompleted: (cred) async {
+          try {
+            await user.linkWithCredential(cred);
+          } catch (_) {}
+        },
+        verificationFailed: (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Verification failed: ${e.message}')),
+          );
+        },
+        codeSent: (vId, _) async {
+          final controller = TextEditingController();
+          final code = await showDialog<String>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Enter SMS Code'),
+              content: TextField(
+                controller: controller,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: '6-digit code'),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () =>
+                      Navigator.pop(context, controller.text.trim()),
+                  child: const Text('Verify'),
+                ),
+              ],
+            ),
+          );
+          if (code == null || code.isEmpty) return;
+          final credential = PhoneAuthProvider.credential(
+            verificationId: vId,
+            smsCode: code,
+          );
+          try {
+            await user.linkWithCredential(credential);
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .set({'phone': phone}, SetOptions(merge: true));
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Phone number added to your account.'),
+              ),
+            );
+          } catch (e) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('Failed to link phone: $e')));
+          }
+        },
+        codeAutoRetrievalTimeout: (_) {},
+        timeout: const Duration(seconds: 60),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -252,6 +459,23 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
                             ).pushNamedAndRemoveUntil('/auth', (_) => false);
                           }
                         },
+                ),
+                const Divider(height: 0),
+                ListTile(
+                  leading: const Icon(
+                    Icons.alternate_email,
+                    color: Color(0xFF795548),
+                  ),
+                  title: const Text('Add email'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _busy ? null : _linkEmail,
+                ),
+                const Divider(height: 0),
+                ListTile(
+                  leading: const Icon(Icons.sms, color: Color(0xFF795548)),
+                  title: const Text('Add phone number'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _busy ? null : _linkPhone,
                 ),
                 const Divider(height: 0),
                 ListTile(

@@ -8,7 +8,9 @@
     "cleanup:placeholders:dry": "node scripts/cleanup_placeholders.mjs --dry-run",
     "cleanup:placeholders": "node scripts/cleanup_placeholders.mjs",
     "handles:reset:dry": "node scripts/reset_handle_limits.mjs --dry-run",
-    "handles:reset": "node scripts/reset_handle_limits.mjs"
+    "handles:reset": "node scripts/reset_handle_limits.mjs",
+    "purge:dry": "node scripts/purge_all.mjs --dry-run",
+    "purge": "node scripts/purge_all.mjs"
   },
   "dependencies": {
     "firebase-admin": "^12.6.0"

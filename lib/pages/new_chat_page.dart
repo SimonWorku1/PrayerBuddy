@@ -51,6 +51,26 @@ class _NewChatPageState extends State<NewChatPage> {
     final memberIds = <String>{me.uid, ..._selectedUserIds}.toList()..sort();
     final isGroup = memberIds.length > 2;
     // Title: for group, prompt later; for 1:1, resolve other name lazily
+    if (!isGroup) {
+      // Deduplicate 1:1 chats by using a stable memberKey as document ID
+      final memberKey = memberIds.join('_');
+      final chatDoc = FirebaseFirestore.instance
+          .collection('chats')
+          .doc(memberKey);
+      await chatDoc.set({
+        'memberIds': memberIds,
+        'memberKey': memberKey,
+        'isGroup': false,
+        'title': '',
+        'createdAt': FieldValue.serverTimestamp(),
+        'lastMessageAt': FieldValue.serverTimestamp(),
+        'lastMessageText': '',
+      }, SetOptions(merge: true));
+      if (!mounted) return;
+      Navigator.of(context).pop(chatDoc.id);
+      return;
+    }
+
     final chatRef = await FirebaseFirestore.instance.collection('chats').add({
       'memberIds': memberIds,
       'isGroup': isGroup,
@@ -130,7 +150,12 @@ class _NewChatPageState extends State<NewChatPage> {
         final handle = (data['handle'] ?? '') as String;
         final selected = _selectedUserIds.contains(uid);
         return ListTile(
-          leading: const CircleAvatar(child: Icon(Icons.person)),
+          leading: CircleAvatar(
+            backgroundImage: data['photoUrl'] != null
+                ? NetworkImage(data['photoUrl'])
+                : null,
+            child: data['photoUrl'] == null ? const Icon(Icons.person) : null,
+          ),
           title: Text(name),
           subtitle: handle.isNotEmpty ? Text('@$handle') : null,
           trailing: Checkbox(
@@ -185,7 +210,14 @@ class _NewChatPageState extends State<NewChatPage> {
                 final handle = (data['handle'] ?? '') as String;
                 final selected = _selectedUserIds.contains(friendId);
                 return ListTile(
-                  leading: const CircleAvatar(child: Icon(Icons.person)),
+                  leading: CircleAvatar(
+                    backgroundImage: data['photoUrl'] != null
+                        ? NetworkImage(data['photoUrl'])
+                        : null,
+                    child: data['photoUrl'] == null
+                        ? const Icon(Icons.person)
+                        : null,
+                  ),
                   title: Text(name),
                   subtitle: handle.isNotEmpty ? Text('@$handle') : null,
                   trailing: Checkbox(
