@@ -93,14 +93,15 @@ class _GroupCallPageState extends State<GroupCallPage> {
     await _initRenderer();
     final mediaConstraints = {
       'audio': true,
-      'video': (await Permission.camera.status).isGranted
-          ? {
-              'facingMode': 'user',
-              'width': {'ideal': 640},
-              'height': {'ideal': 360},
-              'frameRate': {'ideal': 24},
-            }
-          : false,
+      // Always attempt to get video initially so iOS can present the
+      // system camera permission prompt. We will fall back to audio-only
+      // if this fails (e.g., user denies or simulator has no camera).
+      'video': {
+        'facingMode': 'user',
+        'width': {'ideal': 640},
+        'height': {'ideal': 360},
+        'frameRate': {'ideal': 24},
+      },
     };
     MediaStream? stream;
     try {
@@ -294,18 +295,27 @@ class _GroupCallPageState extends State<GroupCallPage> {
     if (_voiceConnected || !_joined) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    final granted = await _promptForPermissions();
-    if (!granted) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Enable mic/camera in Settings to speak.'),
-          ),
-        );
+    try {
+      // Attempt to open mic/camera directly; iOS will show the system prompt
+      // on first getUserMedia call if Info.plist keys exist.
+      await _initLocalMedia();
+    } catch (e) {
+      // If the system blocked the prompt or access is denied, fall back to
+      // an explicit permission dialog that can open Settings.
+      final granted = await _promptForPermissions();
+      if (!granted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Enable mic/camera in Settings to speak.'),
+            ),
+          );
+        }
+        return;
       }
-      return;
+      // Try again after user action
+      await _initLocalMedia();
     }
-    await _initLocalMedia();
 
     final roomDoc = FirebaseFirestore.instance.collection('calls').doc(_roomId);
 
