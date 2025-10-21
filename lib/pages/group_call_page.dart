@@ -16,109 +16,76 @@ class GroupCallPage extends StatefulWidget {
 class _GroupCallPageState extends State<GroupCallPage> {
   final TextEditingController _roomController = TextEditingController();
   final Map<String, RTCPeerConnection> _peerIdToPc = {};
-  final Map<String, RTCVideoRenderer> _peerIdToRenderer = {};
+  // Video renderers removed (audio-only)
   final Map<String, StreamSubscription> _peerListeners = {};
-  final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
+  // Local video renderer removed (audio-only)
   MediaStream? _localStream;
-  bool _rendererInitialized = false;
+  // Renderer state removed
 
   bool _joined = false;
   bool _micEnabled = true;
-  bool _camEnabled = true;
+  // Deprecated; replaced by _videoEnabled
+  // bool _camEnabled = true;
   String _roomId = '';
   String _selectedRoomId = '';
   bool _voiceConnected = false;
+  String _myPhotoUrl = '';
 
   @override
   void initState() {
     super.initState();
+    _loadMyProfilePhoto().ignore();
   }
 
   @override
   void dispose() {
     _cleanup().ignore();
-    if (_rendererInitialized) {
-      _localRenderer.dispose();
-    }
     _roomController.dispose();
     super.dispose();
   }
 
-  Future<void> _initRenderer() async {
+  // initRenderer removed (video disabled)
+
+  Future<void> _loadMyProfilePhoto() async {
+    final me = FirebaseAuth.instance.currentUser;
+    if (me == null) return;
     try {
-      await _localRenderer.initialize();
-      _rendererInitialized = true;
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(me.uid)
+          .get();
+      final url = (snap.data()?['photoUrl'] as String?) ?? '';
+      if (mounted) setState(() => _myPhotoUrl = url);
     } catch (_) {}
   }
 
-  Future<bool> _promptForPermissions() async {
-    // Microphone (required)
-    var mic = await Permission.microphone.status;
-    if (!mic.isGranted) {
-      mic = await Permission.microphone.request();
-      if (!mic.isGranted) {
-        final open = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Microphone access needed'),
-            content: const Text(
-              'To speak in the room, enable microphone access for Prayer Buddy.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Not now'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Open Settings'),
-              ),
-            ],
-          ),
-        );
-        if (open == true) await openAppSettings();
-        return false;
-      }
-    }
+  // Deprecated combined prompt; audio/video handled separately now
 
-    // Camera (optional): request once; if denied, continue voice-only
-    var cam = await Permission.camera.status;
-    if (!cam.isGranted && !cam.isPermanentlyDenied) {
-      await Permission.camera.request();
-    }
-    return true;
-  }
-
-  Future<void> _initLocalMedia() async {
-    await _initRenderer();
+  Future<void> _initLocalMedia({bool withVideo = false}) async {
     final mediaConstraints = {
-      'audio': true,
-      // Always attempt to get video initially so iOS can present the
-      // system camera permission prompt. We will fall back to audio-only
-      // if this fails (e.g., user denies or simulator has no camera).
-      'video': {
-        'facingMode': 'user',
-        'width': {'ideal': 640},
-        'height': {'ideal': 360},
-        'frameRate': {'ideal': 24},
-      },
+      'audio': {'echoCancellation': true, 'noiseSuppression': true},
+      'video': false,
     };
     MediaStream? stream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+      // iOS can occasionally hang right after permission; add a timeout.
+      stream = await navigator.mediaDevices
+          .getUserMedia(mediaConstraints)
+          .timeout(const Duration(seconds: 8));
     } catch (e) {
       // Fallback to audio-only if camera init fails (e.g., simulator issues)
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          'audio': true,
-          'video': false,
-        });
+        stream = await navigator.mediaDevices
+            .getUserMedia({
+              'audio': {'echoCancellation': true, 'noiseSuppression': true},
+              'video': false,
+            })
+            .timeout(const Duration(seconds: 8));
       } catch (_) {
         rethrow;
       }
     }
     _localStream = stream;
-    _localRenderer.srcObject = stream;
     setState(() {});
   }
 
@@ -142,20 +109,9 @@ class _GroupCallPageState extends State<GroupCallPage> {
       }
     }
 
-    // Remote tracks
+    // Remote tracks (audio-only path; no rendering required)
     pc.onTrack = (RTCTrackEvent event) async {
-      if (event.streams.isEmpty) return;
-      final remoteStream = event.streams.first;
-      if (!_peerIdToRenderer.containsKey(remoteUid)) {
-        final renderer = RTCVideoRenderer();
-        await renderer.initialize();
-        renderer.srcObject = remoteStream;
-        _peerIdToRenderer[remoteUid] = renderer;
-        if (mounted) setState(() {});
-      } else {
-        _peerIdToRenderer[remoteUid]!.srcObject = remoteStream;
-        if (mounted) setState(() {});
-      }
+      // No-op for audio track
     };
 
     // ICE candidates → Firestore
@@ -280,6 +236,16 @@ class _GroupCallPageState extends State<GroupCallPage> {
 
     final calls = FirebaseFirestore.instance.collection('calls');
     final roomDoc = calls.doc(_roomId);
+    // Enforce max 2 participants (including me) for STUN audio-only rooms
+    final participantsSnap = await roomDoc.collection('participants').get();
+    if (participantsSnap.docs.length >= 2) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Room is full (2 participants max).')),
+        );
+      }
+      return;
+    }
     await roomDoc.set({
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -291,43 +257,47 @@ class _GroupCallPageState extends State<GroupCallPage> {
     if (mounted) setState(() => _joined = true);
   }
 
-  Future<void> _connectVoice() async {
+  // _connectVoice deprecated in favor of _connectAudio
+
+  Future<void> _connectAudio() async {
     if (_voiceConnected || !_joined) return;
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    try {
-      // Attempt to open mic/camera directly; iOS will show the system prompt
-      // on first getUserMedia call if Info.plist keys exist.
-      await _initLocalMedia();
-    } catch (e) {
-      // If the system blocked the prompt or access is denied, fall back to
-      // an explicit permission dialog that can open Settings.
-      final granted = await _promptForPermissions();
-      if (!granted) {
+    // Request mic only
+    var mic = await Permission.microphone.status;
+    if (!mic.isGranted) {
+      mic = await Permission.microphone.request();
+      if (!mic.isGranted) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Enable mic/camera in Settings to speak.'),
-            ),
+            const SnackBar(content: Text('Microphone permission required.')),
           );
         }
         return;
       }
-      // Try again after user action
-      await _initLocalMedia();
     }
-
-    final roomDoc = FirebaseFirestore.instance.collection('calls').doc(_roomId);
-
-    // Connect to existing participants now
-    final current = await roomDoc.collection('participants').get();
-    for (final doc in current.docs) {
-      final otherUid = doc.id;
-      if (otherUid != user.uid) {
-        await _startMeshWith(otherUid);
+    // Init audio-only stream and connect peers with guard against re-entry
+    try {
+      await _initLocalMedia(withVideo: false);
+      await _postConnectPeerSetup();
+      if (mounted) setState(() => _voiceConnected = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to access microphone: $e')),
+        );
       }
     }
+  }
 
+  Future<void> _postConnectPeerSetup() async {
+    final roomDoc = FirebaseFirestore.instance.collection('calls').doc(_roomId);
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    // Allow exactly one peer for STUN audio-only
+    final current = await roomDoc.collection('participants').get();
+    final others = current.docs.where((d) => d.id != user.uid).toList();
+    if (others.isNotEmpty) {
+      await _startMeshWith(others.first.id);
+    }
     // And subscribe for future joiners
     _peerListeners['participants']?.cancel();
     _peerListeners['participants'] = roomDoc
@@ -338,16 +308,18 @@ class _GroupCallPageState extends State<GroupCallPage> {
             final otherUid = change.doc.id;
             if (otherUid == user.uid) continue;
             if (change.type == DocumentChangeType.added) {
-              _startMeshWith(otherUid);
+              if (_peerIdToPc.isEmpty) {
+                _startMeshWith(otherUid);
+              }
             }
             if (change.type == DocumentChangeType.removed) {
               _teardownPeer(otherUid);
             }
           }
         });
-
-    if (mounted) setState(() => _voiceConnected = true);
   }
+
+  // start/stop video removed (video disabled)
 
   Future<void> _disconnectVoice() async {
     if (!_voiceConnected) return;
@@ -360,12 +332,10 @@ class _GroupCallPageState extends State<GroupCallPage> {
     for (final uid in _peerIdToPc.keys.toList()) {
       await _peerIdToPc.remove(uid)?.close();
     }
-    for (final uid in _peerIdToRenderer.keys.toList()) {
-      await _peerIdToRenderer.remove(uid)?.dispose();
-    }
+    // no renderers to dispose in audio-only mode
     await _localStream?.dispose();
     _localStream = null;
-    _localRenderer.srcObject = null;
+    // no renderer to clear
     if (mounted) setState(() => _voiceConnected = false);
   }
 
@@ -384,8 +354,7 @@ class _GroupCallPageState extends State<GroupCallPage> {
     _peerListeners.remove('$remoteUid-cand')?.cancel();
     final pc = _peerIdToPc.remove(remoteUid);
     await pc?.close();
-    final r = _peerIdToRenderer.remove(remoteUid);
-    await r?.dispose();
+    // no renderer per peer in audio-only mode
     if (mounted) setState(() {});
   }
 
@@ -398,10 +367,7 @@ class _GroupCallPageState extends State<GroupCallPage> {
       await pc.close();
     }
     _peerIdToPc.clear();
-    for (final r in _peerIdToRenderer.values) {
-      await r.dispose();
-    }
-    _peerIdToRenderer.clear();
+    // no renderers to dispose in audio-only mode
 
     final me = FirebaseAuth.instance.currentUser;
     if (me != null && _roomId.isNotEmpty) {
@@ -416,11 +382,7 @@ class _GroupCallPageState extends State<GroupCallPage> {
     }
     await _localStream?.dispose();
     _localStream = null;
-    if (_rendererInitialized) {
-      try {
-        _localRenderer.srcObject = null;
-      } catch (_) {}
-    }
+    // no renderer state to reset
   }
 
   Future<void> _toggleMic() async {
@@ -431,28 +393,27 @@ class _GroupCallPageState extends State<GroupCallPage> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _toggleCam() async {
-    _camEnabled = !_camEnabled;
-    for (final t in _localStream?.getVideoTracks() ?? const []) {
-      t.enabled = _camEnabled;
-    }
-    if (mounted) setState(() {});
-  }
+  // _toggleCam deprecated; replaced by _startVideo/_stopVideo
 
   @override
   Widget build(BuildContext context) {
     final tiles = <Widget>[];
     if (_localStream != null) {
-      tiles.add(_buildRendererTile(_localRenderer, label: 'You'));
+      tiles.add(_buildAvatarTile(_myPhotoUrl, label: 'You'));
     }
-    _peerIdToRenderer.forEach((uid, renderer) {
-      tiles.add(_buildRendererTile(renderer));
-    });
+    // No remote video tiles in audio-only mode
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5DC),
       appBar: AppBar(
         title: Text(_joined ? 'Group Call' : 'Group Rooms'),
+        leading: _joined
+            ? IconButton(
+                tooltip: 'Leave',
+                onPressed: _leave,
+                icon: const Icon(Icons.logout),
+              )
+            : null,
         backgroundColor: Colors.transparent,
         elevation: 0,
       ),
@@ -485,13 +446,7 @@ class _GroupCallPageState extends State<GroupCallPage> {
                           icon: Icon(_micEnabled ? Icons.mic : Icons.mic_off),
                         ),
                         const SizedBox(width: 12),
-                        IconButton(
-                          tooltip: _camEnabled ? 'Stop video' : 'Start video',
-                          onPressed: _toggleCam,
-                          icon: Icon(
-                            _camEnabled ? Icons.videocam : Icons.videocam_off,
-                          ),
-                        ),
+                        // Video controls removed for STUN audio-only mode
                         const SizedBox(width: 12),
                         ElevatedButton(
                           onPressed: _disconnectVoice,
@@ -499,16 +454,11 @@ class _GroupCallPageState extends State<GroupCallPage> {
                         ),
                       ] else ...[
                         ElevatedButton.icon(
-                          onPressed: _connectVoice,
+                          onPressed: _connectAudio,
                           icon: const Icon(Icons.headset_mic),
-                          label: const Text('Connect voice'),
+                          label: const Text('Connect audio'),
                         ),
                       ],
-                      const SizedBox(width: 12),
-                      OutlinedButton(
-                        onPressed: _leave,
-                        child: const Text('Leave room'),
-                      ),
                     ],
                   ),
                 ],
@@ -617,17 +567,40 @@ class _GroupCallPageState extends State<GroupCallPage> {
     );
   }
 
-  Widget _buildRendererTile(RTCVideoRenderer renderer, {String label = ''}) {
+  // Video tile removed for audio-only mode
+
+  Widget _buildAvatarTile(String url, {String label = ''}) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: Container(
         color: Colors.black,
         child: Stack(
           children: [
-            RTCVideoView(
-              renderer,
-              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
-              mirror: renderer == _localRenderer,
+            Positioned.fill(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final side = constraints.biggest.shortestSide;
+                  double radius = side * 0.32;
+                  if (radius < 24) radius = 24;
+                  if (radius > 64) radius = 64;
+                  return Center(
+                    child: CircleAvatar(
+                      radius: radius,
+                      backgroundColor: Colors.white10,
+                      backgroundImage: url.isNotEmpty
+                          ? NetworkImage(url)
+                          : null,
+                      child: url.isEmpty
+                          ? Icon(
+                              Icons.person,
+                              color: Colors.white54,
+                              size: radius,
+                            )
+                          : null,
+                    ),
+                  );
+                },
+              ),
             ),
             if (label.isNotEmpty)
               Positioned(
