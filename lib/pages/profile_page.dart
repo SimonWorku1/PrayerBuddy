@@ -63,18 +63,19 @@ class _ProfilePageState extends State<ProfilePage> {
     return raw.trim().toLowerCase();
   }
 
-  // If the @handle changed, reserve it and update counts atomically.
+  // If the @handle changed, reserve it atomically (no cooldowns anymore).
   Future<void> _claimHandleIfChanged() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     final newRaw = _handleController.text;
     final newHandle = _sanitizeHandle(newRaw);
-    // If empty, skip (user chooses no handle)
     if (newHandle.isEmpty) return;
-    if (!RegExp(r'^[a-z0-9_]{3,20}$').hasMatch(newHandle)) {
+    if (!RegExp(r'^[a-z]{3,20}$').hasMatch(newHandle)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Handle must be 3-20 chars: a-z, 0-9, _')),
+        const SnackBar(
+          content: Text('Handle must be letters only, 3-20 chars'),
+        ),
       );
       throw Exception('invalid handle');
     }
@@ -87,27 +88,9 @@ class _ProfilePageState extends State<ProfilePage> {
       final userSnap = await tx.get(userRef);
       final userData = userSnap.data() ?? {};
       final currentHandle = (userData['handle'] ?? '') as String;
-      final changeCount = (userData['handleChangeCount'] ?? 0) as int;
-      final resetAt = userData['handleChangeResetAt'] as Timestamp?;
 
       // If unchanged, nothing to do
       if (currentHandle == newHandle) return;
-
-      // Enforce <= 3 changes in a 30-day window
-      final now = DateTime.now();
-      DateTime? resetAtDt = resetAt?.toDate();
-      int effectiveCount = changeCount;
-      if (resetAtDt == null ||
-          now.isAfter(resetAtDt.add(const Duration(days: 30)))) {
-        // Window expired or not started – reset
-        resetAtDt = now;
-        effectiveCount = 0;
-      }
-      if (effectiveCount >= 3) {
-        throw Exception(
-          'You have changed your @ too many times. Try again later.',
-        );
-      }
 
       // Ensure target handle is free
       final hSnap = await tx.get(handleRef);
@@ -150,8 +133,6 @@ class _ProfilePageState extends State<ProfilePage> {
       tx.set(userRef, {
         'handle': newHandle,
         'handleUpdatedAt': FieldValue.serverTimestamp(),
-        'handleChangeResetAt': Timestamp.fromDate(resetAtDt),
-        'handleChangeCount': effectiveCount + 1,
       }, SetOptions(merge: true));
     });
   }
@@ -332,7 +313,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
               const SizedBox(height: 24),
-              // Handle (@username) field; locks input if change limit reached.
+              // Handle (@username) field; no cooldown limits.
               StreamBuilder<DocumentSnapshot>(
                 stream: FirebaseAuth.instance.currentUser == null
                     ? null
@@ -341,44 +322,13 @@ class _ProfilePageState extends State<ProfilePage> {
                           .doc(FirebaseAuth.instance.currentUser!.uid)
                           .snapshots(),
                 builder: (context, snapshot) {
-                  bool lock = false;
-                  if (snapshot.hasData && snapshot.data!.exists) {
-                    final data = snapshot.data!.data() as Map<String, dynamic>;
-                    final cnt = (data['handleChangeCount'] ?? 0) as int;
-                    final rst = data['handleChangeResetAt'] as Timestamp?;
-                    final now = DateTime.now();
-                    final windowStart = rst?.toDate();
-                    if (windowStart != null &&
-                        now.isBefore(
-                          windowStart.add(const Duration(days: 30)),
-                        ) &&
-                        cnt >= 3) {
-                      lock = true;
-                    }
-                  }
-                  return GestureDetector(
-                    onTap: () {
-                      if (lock) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'You changed your @ too many times. Please try again later.',
-                            ),
-                          ),
-                        );
-                      }
-                    },
-                    child: AbsorbPointer(
-                      absorbing: lock,
-                      child: TextFormField(
-                        controller: _handleController,
-                        decoration: const InputDecoration(
-                          labelText: 'Handle (@username)',
-                          hintText: 'e.g. @john_doe',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.alternate_email),
-                        ),
-                      ),
+                  return TextFormField(
+                    controller: _handleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Handle (@username)',
+                      hintText: 'letters only, min 3',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.alternate_email),
                     ),
                   );
                 },

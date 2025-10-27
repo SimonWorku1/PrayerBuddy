@@ -112,7 +112,7 @@ class PhoneFormatter {
   static String formatPhoneNumber(String phoneNumber, String countryCode) {
     // Remove all non-digit characters
     String digitsOnly = phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
-    
+
     String? dialingCode = getDialingCodeByCountry(countryCode);
     if (dialingCode == null) {
       return phoneNumber; // Return original if country not found
@@ -199,7 +199,7 @@ class PhoneFormatter {
   static String getCleanPhoneNumber(String phoneNumber, String countryCode) {
     String digitsOnly = phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
     String? dialingCode = getDialingCodeByCountry(countryCode);
-    
+
     if (dialingCode == null) {
       return phoneNumber;
     }
@@ -216,13 +216,13 @@ class PhoneFormatter {
   static bool isValidPhoneNumber(String phoneNumber, String countryCode) {
     String cleanNumber = getCleanPhoneNumber(phoneNumber, countryCode);
     String? dialingCode = getDialingCodeByCountry(countryCode);
-    
+
     if (dialingCode == null) return false;
 
     // Remove the + and country code for length check
     String numberWithoutCode = cleanNumber.replaceAll(dialingCode, '');
-    
+
     // Basic validation - most countries have 7-15 digits
     return numberWithoutCode.length >= 7 && numberWithoutCode.length <= 15;
   }
-} 
+}

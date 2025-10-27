@@ -176,24 +176,7 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
 
     setState(() => _busy = true);
     try {
-      // Release handle if present
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      final data = userDoc.data();
-      final handle = data != null ? (data['handle'] ?? '') as String : '';
-      if (handle.isNotEmpty) {
-        final handleRef = FirebaseFirestore.instance
-            .collection('handles')
-            .doc(handle);
-        await handleRef.delete();
-      }
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .delete();
-      await user.delete();
+      await _authService.deleteAccountCascade(user);
       if (!mounted) return;
       Navigator.of(context).pushNamedAndRemoveUntil('/auth', (_) => false);
     } catch (e) {
@@ -201,6 +184,46 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deactivateAccount() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Deactivate account?'),
+        content: const Text(
+          'You can reactivate by signing in again. Your content will be hidden.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Deactivate'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    setState(() => _busy = true);
+    try {
+      await _authService.handleAccountDeactivation(user.uid);
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) return;
+      Navigator.of(context).pushNamedAndRemoveUntil('/auth', (_) => false);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -476,6 +499,16 @@ class _AccountActionsPageState extends State<AccountActionsPage> {
                   title: const Text('Add phone number'),
                   trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                   onTap: _busy ? null : _linkPhone,
+                ),
+                const Divider(height: 0),
+                ListTile(
+                  leading: const Icon(
+                    Icons.pause_circle_outline,
+                    color: Colors.orange,
+                  ),
+                  title: const Text('Deactivate account'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                  onTap: _busy ? null : _deactivateAccount,
                 ),
                 const Divider(height: 0),
                 ListTile(

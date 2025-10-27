@@ -245,151 +245,94 @@ Future<void> _showVerseDialog(
   String usedVersion = version;
   try {
     final upper = version.toUpperCase();
-    final apiBibleKey = const String.fromEnvironment('BIBLE_API_KEY');
-    if (apiBibleKey.isNotEmpty) {
-      // Resolve a Bible ID for the requested abbreviation (e.g., NIV, ESV, KJV, NKJV, NLT)
-      final lookupUri = Uri.parse(
-        'https://api.scripture.api.bible/v1/bibles?abbreviation=${Uri.encodeQueryComponent(upper)}',
-      );
-      final lookupRes = await http
-          .get(lookupUri, headers: {'api-key': apiBibleKey})
-          .timeout(const Duration(seconds: 8));
-      String? bibleId;
-      if (lookupRes.statusCode == 200) {
-        final body = json.decode(lookupRes.body) as Map<String, dynamic>;
-        final list = (body['data'] as List?) ?? const [];
-        if (list.isNotEmpty) {
-          // Prefer exact abbreviation match; otherwise first result
-          final exact = list.cast<Map<String, dynamic>>().firstWhere(
-            (b) =>
-                (b['abbreviation'] as String?)?.toUpperCase() == upper ||
-                (b['abbreviationLocal'] as String?)?.toUpperCase() == upper,
-            orElse: () => list.first as Map<String, dynamic>,
-          );
-          bibleId = exact['id'] as String?;
+
+    // Try BibleGateway proxy first (requires Functions to be configured)
+    try {
+      // Default Functions region uses cloudfunctions.net; if using v2, adjust host accordingly
+      const projectId = 'prayerbuddy-6ca4a';
+      final uri = Uri.parse(
+        'https://us-central1-$projectId.cloudfunctions.net/bibleGatewayPassage',
+      ).replace(queryParameters: {'ref': ref, 'version': upper});
+      final res = await http.get(uri).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final body = json.decode(res.body) as Map<String, dynamic>;
+        final t = (body['text'] as String? ?? '').trim();
+        if (t.isNotEmpty) {
+          text = t;
+          usedVersion = (body['version'] as String? ?? upper).toUpperCase();
         }
       }
+    } catch (_) {}
 
-      // If no specific bible found, try a generic English KJV as a fallback
-      if (bibleId == null) {
-        final kjvUri = Uri.parse(
-          'https://api.scripture.api.bible/v1/bibles?abbreviation=KJV',
-        );
-        final kjvRes = await http
-            .get(kjvUri, headers: {'api-key': apiBibleKey})
-            .timeout(const Duration(seconds: 8));
-        if (kjvRes.statusCode == 200) {
-          final body = json.decode(kjvRes.body) as Map<String, dynamic>;
-          final list = (body['data'] as List?) ?? const [];
-          if (list.isNotEmpty) {
-            bibleId = (list.first as Map<String, dynamic>)['id'] as String?;
-            usedVersion = 'KJV';
-          }
-        }
-      }
-
-      if (bibleId != null) {
-        final passageUri = Uri.parse(
-          'https://api.scripture.api.bible/v1/bibles/$bibleId/passages/'
-          '${Uri.encodeComponent(ref)}'
-          '?contentType=text'
-          '&includeFootnotes=false'
-          '&includeHeadings=false'
-          '&includeVerseNumbers=false'
-          '&includeChapterNumbers=false'
-          '&includePassageReferences=false',
-        );
-        final passageRes = await http
-            .get(passageUri, headers: {'api-key': apiBibleKey})
-            .timeout(const Duration(seconds: 8));
-        if (passageRes.statusCode == 200) {
-          final pb = json.decode(passageRes.body) as Map<String, dynamic>;
-          final data = pb['data'];
-          if (data is Map<String, dynamic>) {
-            final content = data['content'];
-            if (content is String && content.trim().isNotEmpty) {
-              text = content.trim();
-              usedVersion = upper;
-            } else if (data['passages'] is List) {
-              final joined = (data['passages'] as List)
-                  .map(
-                    (e) =>
-                        (e as Map<String, dynamic>)['content'] as String? ?? '',
-                  )
-                  .map((e) => e.trim())
-                  .where((e) => e.isNotEmpty)
-                  .join('\n\n');
-              if (joined.isNotEmpty) {
-                text = joined;
-                usedVersion = upper;
-              }
-            }
-          }
-        }
-
-        // If no text yet, try resolving passage ID via search
-        if (text.isEmpty) {
-          final searchUri = Uri.parse(
-            'https://api.scripture.api.bible/v1/bibles/$bibleId/search'
-            '?query=${Uri.encodeQueryComponent(ref)}&limit=3',
-          );
-          final searchRes = await http
-              .get(searchUri, headers: {'api-key': apiBibleKey})
-              .timeout(const Duration(seconds: 8));
-          if (searchRes.statusCode == 200) {
-            final sb = json.decode(searchRes.body) as Map<String, dynamic>;
-            final sdata = sb['data'];
-            List<String> passageIds = [];
-            if (sdata is Map<String, dynamic>) {
-              final passages = sdata['passages'];
-              final verses = sdata['verses'];
-              if (passages is List && passages.isNotEmpty) {
-                passageIds = passages
-                    .cast<Map<String, dynamic>>()
-                    .map((p) => p['id'] as String? ?? '')
-                    .where((id) => id.isNotEmpty)
-                    .toList();
-              } else if (verses is List && verses.isNotEmpty) {
-                passageIds = verses
-                    .cast<Map<String, dynamic>>()
-                    .map(
-                      (v) =>
-                          v['passageId'] as String? ??
-                          (v['id'] as String? ?? ''),
-                    )
-                    .where((id) => id.isNotEmpty)
-                    .toList();
-              }
-            }
-
-            if (passageIds.isNotEmpty) {
-              final resolved = <String>[];
-              for (final pid in passageIds) {
-                final rUri = Uri.parse(
-                  'https://api.scripture.api.bible/v1/bibles/$bibleId/passages/$pid'
-                  '?contentType=text&includeFootnotes=false&includeHeadings=false'
-                  '&includeVerseNumbers=false&includeChapterNumbers=false&includePassageReferences=false',
-                );
-                final r = await http
-                    .get(rUri, headers: {'api-key': apiBibleKey})
-                    .timeout(const Duration(seconds: 8));
-                if (r.statusCode == 200) {
-                  final rb = json.decode(r.body) as Map<String, dynamic>;
-                  final rd = rb['data'];
-                  final rc = rd is Map<String, dynamic> ? rd['content'] : null;
-                  if (rc is String && rc.trim().isNotEmpty) {
-                    resolved.add(rc.trim());
-                  }
+    // HelloAO Free Use Bible API (no key). Try primary parameter set.
+    try {
+      final helloUri = Uri.parse(
+        'https://bible.helloao.org/api',
+      ).replace(queryParameters: {'translation': upper, 'reference': ref});
+      final res = await http.get(helloUri).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final body = res.body.trim();
+        if (body.isNotEmpty) {
+          // If the response looks like HTML, skip using it so we can
+          // fall back to a reliable JSON/text source.
+          final looksLikeHtml =
+              body.startsWith('<!doctype') ||
+              body.startsWith('<!DOCTYPE') ||
+              body.startsWith('<html');
+          if (!looksLikeHtml) {
+            // Try to parse JSON text field, otherwise treat as plain text
+            try {
+              final obj = json.decode(body);
+              if (obj is Map<String, dynamic>) {
+                final maybe = (obj['text'] ?? obj['content'] ?? '') as String?;
+                if (maybe != null && maybe.trim().isNotEmpty) {
+                  text = maybe.trim();
                 }
               }
-              if (resolved.isNotEmpty) {
-                text = resolved.join('\n\n');
-                usedVersion = upper;
-              }
+            } catch (_) {
+              // Not JSON – assume plain text
+              if (text.isEmpty) text = body;
             }
+            if (text.isNotEmpty) usedVersion = upper;
           }
         }
       }
+    } catch (_) {}
+
+    // Try alternative param name if first attempt failed
+    if (text.isEmpty) {
+      try {
+        final helloUriAlt = Uri.parse(
+          'https://bible.helloao.org/api',
+        ).replace(queryParameters: {'version': upper, 'reference': ref});
+        final res2 = await http
+            .get(helloUriAlt)
+            .timeout(const Duration(seconds: 8));
+        if (res2.statusCode == 200) {
+          final body = res2.body.trim();
+          if (body.isNotEmpty) {
+            final looksLikeHtml =
+                body.startsWith('<!doctype') ||
+                body.startsWith('<!DOCTYPE') ||
+                body.startsWith('<html');
+            if (!looksLikeHtml) {
+              try {
+                final obj = json.decode(body);
+                if (obj is Map<String, dynamic>) {
+                  final maybe =
+                      (obj['text'] ?? obj['content'] ?? '') as String?;
+                  if (maybe != null && maybe.trim().isNotEmpty) {
+                    text = maybe.trim();
+                  }
+                }
+              } catch (_) {
+                if (text.isEmpty) text = body;
+              }
+              if (text.isNotEmpty) usedVersion = upper;
+            }
+          }
+        }
+      } catch (_) {}
     }
 
     // As a final fallback, use bible-api.com KJV
@@ -428,24 +371,24 @@ Future<void> _showVerseDialog(
     context: context,
     builder: (ctx) => AlertDialog(
       title: Text(ref),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(text),
-          const SizedBox(height: 8),
-          Text(
-            'Version: $usedVersion',
-            style: const TextStyle(color: Colors.grey, fontSize: 12),
-          ),
-          if (usedVersion != version)
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(text),
+            const SizedBox(height: 8),
             Text(
-              const String.fromEnvironment('BIBLE_API_KEY').isEmpty
-                  ? 'Shown in KJV (API key not configured)'
-                  : 'Shown in $usedVersion (requested version unavailable)',
-              style: const TextStyle(color: Colors.grey, fontSize: 11),
+              'Version: $usedVersion',
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
-        ],
+            if (usedVersion != version)
+              Text(
+                'Shown in $usedVersion (requested version unavailable)',
+                style: const TextStyle(color: Colors.grey, fontSize: 11),
+              ),
+          ],
+        ),
       ),
       actions: [
         TextButton(

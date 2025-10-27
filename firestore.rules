@@ -5,28 +5,36 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isActiveUser() {
+      return isSignedIn() && !(request.auth.token.isDeactivated == true);
+    }
+
+    function isDeactivatedUser() {
+      return isSignedIn() && (request.auth.token.isDeactivated == true);
+    }
+
     // Chats
     match /chats/{chatId} {
       // Read allowed only to chat members
-      allow read: if isSignedIn() &&
+      allow read: if isSignedIn() && isActiveUser() &&
         (request.auth.uid in resource.data.memberIds);
 
       // Create allowed if the requester is included in memberIds on create
-      allow create: if isSignedIn() &&
+      allow create: if isSignedIn() && isActiveUser() &&
         (request.auth.uid in request.resource.data.memberIds);
 
       // Update/Delete allowed only to existing chat members
-      allow update, delete: if isSignedIn() &&
+      allow update, delete: if isSignedIn() && isActiveUser() &&
         (request.auth.uid in resource.data.memberIds);
 
       // Messages subcollection
       match /messages/{messageId} {
         // Read allowed to chat members
-        allow read: if isSignedIn() &&
+        allow read: if isSignedIn() && isActiveUser() &&
           (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds);
 
         // Create allowed if sender is the authed user and is a chat member
-        allow create: if isSignedIn() &&
+        allow create: if isSignedIn() && isActiveUser() &&
           request.resource.data.senderId == request.auth.uid &&
           (request.auth.uid in get(/databases/$(database)/documents/chats/$(chatId)).data.memberIds);
 
@@ -35,33 +43,18 @@ service cloud.firestore {
       }
     }
 
-    function canChangeHandle(uid) {
-      // A user may change handles at most 3 times within a 30-day window.
-      // Window anchor and count are stored on users/{uid}.
-      return (
-        // Allow if window not started
-        get(/databases/$(database)/documents/users/$(uid)).data.handleChangeResetAt == null
-      ) || (
-        // Allow if window expired
-        request.time > get(/databases/$(database)/documents/users/$(uid)).data.handleChangeResetAt + duration.value(30, 'd')
-      ) || (
-        // Allow if under the limit
-        (
-          (get(/databases/$(database)/documents/users/$(uid)).data.handleChangeCount == null ? 0 : get(/databases/$(database)/documents/users/$(uid)).data.handleChangeCount) < 3
-        )
-      );
-    }
+    // Removed handle change cooldown. Handled in app; uniqueness is enforced via /handles docs.
 
     // Users can read public profiles; user can update their own
     match /users/{userId} {
-      allow read: if true;
+      allow read: if isSignedIn(); // Allow reading for uniqueness checks during signup
       allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update, delete: if isSignedIn() && request.auth.uid == userId;
+      allow update, delete: if isSignedIn() && request.auth.uid == userId && isActiveUser();
     }
 
     // Friends subcollection under users
     match /users/{userId}/friends/{friendId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && isActiveUser();
       // Either user involved in the friendship may write
       allow create, update, delete: if isSignedIn() &&
         (request.auth.uid == userId || request.auth.uid == friendId);
@@ -69,15 +62,15 @@ service cloud.firestore {
 
     // Posts
     match /posts/{postId} {
-      allow read: if true;
-      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
-      allow update, delete: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow read: if !isDeactivatedUser();
+      allow create: if isSignedIn() && isActiveUser() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isSignedIn() && isActiveUser() && resource.data.ownerId == request.auth.uid;
 
       // Post comments subcollection
       match /comments/{commentId} {
-        allow read: if true;
-        allow create: if isSignedIn() && request.resource.data.authorId == request.auth.uid;
-        allow update, delete: if isSignedIn() && (
+        allow read: if !isDeactivatedUser();
+        allow create: if isSignedIn() && isActiveUser() && request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if isSignedIn() && isActiveUser() && (
           // Comment author can modify their own comment
           (resource.data.authorId == request.auth.uid) ||
           // Post owner can moderate
@@ -88,41 +81,41 @@ service cloud.firestore {
 
     // Friend requests
     match /friend_requests/{requestId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update, delete: if isSignedIn();
+      allow read: if isSignedIn() && isActiveUser();
+      allow create: if isSignedIn() && isActiveUser();
+      allow update, delete: if isSignedIn() && isActiveUser();
     }
 
-    // Unique handles with 30-day cooldown
+    // Unique handles (no cooldown)
     match /handles/{handle} {
-      allow read: if true;
-      // Enforce <=3 changes per 30 days
+      allow read: if !isDeactivatedUser();
+      // Allow creating a handle if it doesn't exist and the uid matches.
+      // During signup, user document may not exist yet, so allow if signed in
       allow create: if isSignedIn()
         && request.resource.data.uid == request.auth.uid
-        && !exists(/databases/$(database)/documents/handles/$(handle))
-        && canChangeHandle(request.auth.uid);
+        && !exists(/databases/$(database)/documents/handles/$(handle));
       allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
       allow update: if false;
     }
 
     // WebRTC signaling: rooms and peer connections
     match /calls/{roomId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn();
+      allow read: if isSignedIn() && isActiveUser();
+      allow create, update, delete: if isSignedIn() && isActiveUser();
 
       match /participants/{uid} {
-        allow read, create, update, delete: if isSignedIn() && request.auth.uid == uid;
+        allow read, create, update, delete: if isSignedIn() && isActiveUser() && request.auth.uid == uid;
       }
 
       match /connections/{connId} {
-        allow read, create, update, delete: if isSignedIn();
+        allow read, create, update, delete: if isSignedIn() && isActiveUser();
 
         match /offerCandidates/{candId} {
-          allow read, create: if isSignedIn();
+          allow read, create: if isSignedIn() && isActiveUser();
           allow update, delete: if false;
         }
         match /answerCandidates/{candId} {
-          allow read, create: if isSignedIn();
+          allow read, create: if isSignedIn() && isActiveUser();
           allow update, delete: if false;
         }
       }

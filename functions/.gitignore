@@ -1,0 +1,7 @@
+# Ignore local environment files
+.env
+.env.*
+
+# Node build artifacts
+lib/
+node_modules/

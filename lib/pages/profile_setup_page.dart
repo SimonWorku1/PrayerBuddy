@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/auth_service.dart';
 
 // One-time profile setup screen shown after authentication.
 class ProfileSetupPage extends StatefulWidget {
@@ -54,9 +55,8 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     final user = widget.user;
     final newHandle = _sanitizeHandle(_handleController.text);
 
-    if (newHandle.isEmpty ||
-        !RegExp(r'^[a-z0-9_]{3,20}$').hasMatch(newHandle)) {
-      throw Exception('Handle must be 3-20 chars: a-z, 0-9, _');
+    if (newHandle.isEmpty || !RegExp(r'^[a-z]{3,20}$').hasMatch(newHandle)) {
+      throw Exception('Handle must be at least 3 letters (a-z)');
     }
 
     final userRef = db.collection('users').doc(user.uid);
@@ -97,6 +97,29 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
     });
 
     try {
+      // Validate uniqueness for optional contact info
+      final auth = AuthService();
+      final phone = _phoneController.text.trim();
+      final email = _emailController.text.trim().toLowerCase();
+      if (phone.isNotEmpty) {
+        final exists = await auth.isPhoneNumberExists(
+          phone,
+          excludeUserId: widget.user.uid,
+        );
+        if (exists) {
+          throw Exception('An account with this phone number already exists.');
+        }
+      }
+      if (email.isNotEmpty) {
+        final exists = await auth.isEmailExists(
+          email,
+          excludeUserId: widget.user.uid,
+        );
+        if (exists) {
+          throw Exception('An account with this email already exists.');
+        }
+      }
+
       // Reserve handle first
       await _claimHandleOnSignup();
 
@@ -119,6 +142,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
             'authProvider': widget.user.providerData.isNotEmpty
                 ? widget.user.providerData.first.providerId
                 : 'email',
+            'isDeactivated': false,
           });
 
       // Navigate to main app
@@ -127,10 +151,51 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
       }
     } catch (e) {
       if (mounted) {
+        String message = 'Unable to save your profile. Please try again.';
+
+        if (e is FirebaseException) {
+          switch (e.code) {
+            case 'permission-denied':
+              message =
+                  'Unable to create your profile. Please check your internet connection and try again.';
+              break;
+            case 'unavailable':
+              message =
+                  'Service is temporarily unavailable. Please try again in a moment.';
+              break;
+            case 'deadline-exceeded':
+            case 'resource-exhausted':
+              message =
+                  'The request took too long. Please check your connection and try again.';
+              break;
+            case 'already-exists':
+              message =
+                  'This handle is already taken. Please choose a different one.';
+              break;
+            default:
+              message = 'Unable to save your profile. Please try again.';
+          }
+        } else {
+          final errorString = e.toString().toLowerCase();
+          if (errorString.contains('handle') && errorString.contains('taken')) {
+            message =
+                'This handle is already taken. Please choose a different one.';
+          } else if (errorString.contains('email') &&
+              errorString.contains('exists')) {
+            message =
+                'An account with this email already exists. Please sign in instead.';
+          } else if (errorString.contains('phone') &&
+              errorString.contains('exists')) {
+            message =
+                'An account with this phone number already exists. Please sign in instead.';
+          }
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error saving profile: ${e.toString()}'),
+            content: Text(message),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -336,45 +401,7 @@ class _ProfileSetupPageState extends State<ProfileSetupPage> {
 
               const SizedBox(height: 20),
 
-              // Skip button (optional)
-              TextButton(
-                onPressed: _isLoading
-                    ? null
-                    : () async {
-                        // Save minimal profile and continue
-                        try {
-                          await FirebaseFirestore.instance
-                              .collection('users')
-                              .doc(widget.user.uid)
-                              .set({
-                                'name': 'User',
-                                'createdAt': FieldValue.serverTimestamp(),
-                                'updatedAt': FieldValue.serverTimestamp(),
-                                'authProvider':
-                                    widget.user.providerData.isNotEmpty
-                                    ? widget.user.providerData.first.providerId
-                                    : 'email',
-                              });
-
-                          if (mounted) {
-                            Navigator.of(context).pushReplacementNamed('/home');
-                          }
-                        } catch (e) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Error: ${e.toString()}'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                          }
-                        }
-                      },
-                child: const Text(
-                  'Skip for now',
-                  style: TextStyle(color: Color(0xFF795548), fontSize: 16),
-                ),
-              ),
+              // No "skip" option; handle is required.
             ],
           ),
         ),

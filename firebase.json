@@ -1,39 +1,10 @@
 {
-  "flutter": {
-    "platforms": {
-      "android": {
-        "default": {
-          "projectId": "prayerbuddy-6ca4a",
-          "appId": "1:262497079999:android:2ef83e8555167eb73a6c0a",
-          "fileOutput": "android/app/google-services.json"
-        }
-      },
-      "ios": {
-        "default": {
-          "projectId": "prayerbuddy-6ca4a",
-          "appId": "1:262497079999:ios:31dc6074b126745c3a6c0a",
-          "uploadDebugSymbols": false,
-          "fileOutput": "ios/Runner/GoogleService-Info.plist"
-        }
-      },
-      "dart": {
-        "lib/firebase_options.dart": {
-          "projectId": "prayerbuddy-6ca4a",
-          "configurations": {
-            "android": "1:262497079999:android:2ef83e8555167eb73a6c0a",
-            "ios": "1:262497079999:ios:31dc6074b126745c3a6c0a"
-          }
-        }
-      }
-    }
-  },
+  "functions": { "source": "functions" },
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
-  "storage": [
-    {
-      "rules": "storage.rules"
-    }
-  ]
+  "storage": {
+    "rules": "storage.rules"
+  }
 }

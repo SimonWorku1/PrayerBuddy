@@ -19,6 +19,7 @@ class MessagesPage extends StatelessWidget {
     final chatsQuery = FirebaseFirestore.instance
         .collection('chats')
         .where('memberIds', arrayContains: user.uid)
+        .where('isHidden', isEqualTo: false)
         .orderBy('lastMessageAt', descending: true)
         .limit(100)
         .snapshots();
@@ -62,7 +63,7 @@ class MessagesPage extends StatelessWidget {
               final chat = docs[index].data() as Map<String, dynamic>;
               final chatId = docs[index].id;
               final lastText = (chat['lastMessageText'] ?? '') as String;
-              final isGroup = (chat['isGroup'] ?? false) as bool;
+              // final isGroup = (chat['isGroup'] ?? false) as bool;
 
               return Dismissible(
                 key: Key(chatId),

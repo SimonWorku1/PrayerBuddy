@@ -11,14 +11,22 @@ import 'pages/find_friends_page.dart';
 import 'pages/post_composer_page.dart';
 import 'pages/user_profile_page.dart';
 import 'pages/messages_page.dart';
+import 'pages/reactivate_page.dart';
 import 'pages/chat_page.dart';
-import 'pages/group_call_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Clear Firestore cache on app startup to prevent deleted posts from showing
+  try {
+    await FirebaseFirestore.instance.clearPersistence();
+  } catch (e) {
+    // Cache might be in use, that's okay - it will be cleared on next restart
+    print('Could not clear Firestore cache: $e');
+  }
 
   // Removed test phone auth override – real SMS verification will be used
 
@@ -119,7 +127,7 @@ class PrayerBuddyApp extends StatelessWidget {
       routes: {
         '/home': (context) => const PrayerBuddyHomePage(),
         '/auth': (context) => const AuthPage(),
-        '/group': (context) => const GroupCallPage(),
+        '/reactivate': (context) => const ReactivatePage(),
       },
     );
   }
@@ -185,6 +193,11 @@ class ProfileCheckWrapper extends StatelessWidget {
         }
 
         if (snapshot.hasData && snapshot.data!.exists) {
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+          // If deactivated, prompt reactivation
+          if ((data['isDeactivated'] ?? false) == true) {
+            return const ReactivatePage();
+          }
           // User profile exists, show main app
           return const PrayerBuddyHomePage();
         } else {
@@ -217,6 +230,29 @@ class _PrayerBuddyHomePageState extends State<PrayerBuddyHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    // Redirect active session to reactivation page if necessary
+    final me = FirebaseAuth.instance.currentUser;
+    if (me != null) {
+      return StreamBuilder<DocumentSnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('users')
+            .doc(me.uid)
+            .snapshots(),
+        builder: (context, snap) {
+          if (snap.hasData && snap.data!.exists) {
+            final data = snap.data!.data() as Map<String, dynamic>;
+            if ((data['isDeactivated'] ?? false) == true) {
+              return const ReactivatePage();
+            }
+          }
+          return _buildScaffold(context);
+        },
+      );
+    }
+    return _buildScaffold(context);
+  }
+
+  Widget _buildScaffold(BuildContext context) {
     return Scaffold(
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 250),
@@ -268,19 +304,24 @@ class _PrayerBuddyHomePageState extends State<PrayerBuddyHomePage> {
   }
 
   Widget _buildCenterJoinButton() {
-    return GestureDetector(
-      onTap: () async {
-        await Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (_) => const GroupCallPage()));
-      },
-      child: Container(
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          color: Color(0xFF795548),
+    return Transform.translate(
+      offset: const Offset(0, -6), // raise hitbox slightly above home indicator
+      child: GestureDetector(
+        onTap: () async {
+          await Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const PostComposerPage()));
+        },
+        child: Container(
+          decoration: const BoxDecoration(
+            shape: BoxShape.circle,
+            color: Color(0xFF795548),
+          ),
+          constraints: const BoxConstraints(minWidth: 56, minHeight: 56),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.all(12),
+          child: const Icon(Icons.add, color: Colors.white, size: 32),
         ),
-        padding: const EdgeInsets.all(8),
-        child: const Icon(Icons.group, color: Colors.white, size: 30),
       ),
     );
   }
@@ -372,16 +413,6 @@ class HomeFeedPage extends StatelessWidget {
         ],
       ),
       body: const _FeedSwitcher(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          await Navigator.of(
-            context,
-          ).push(MaterialPageRoute(builder: (_) => const PostComposerPage()));
-        },
-        backgroundColor: const Color(0xFF795548),
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
-      ),
     );
   }
 }
@@ -488,18 +519,34 @@ class _FriendsFeed extends StatelessWidget {
         return StreamBuilder<QuerySnapshot>(
           stream: posts,
           builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Center(
+                child: Text('Error loading posts: ${snapshot.error}'),
+              );
+            }
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
             final docs = snapshot.data!.docs;
-            if (docs.isEmpty) {
+            // Filter out hidden posts and posts from deactivated users
+            final visibleDocs = docs.where((doc) {
+              final data = doc.data() as Map<String, dynamic>;
+              return data['isHidden'] != true && data['ownerActive'] != false;
+            }).toList();
+
+            if (visibleDocs.isEmpty) {
               return const Center(child: Text('No posts yet'));
             }
             return ListView.builder(
-              itemCount: docs.length,
+              itemCount: visibleDocs.length,
               itemBuilder: (context, index) {
-                final doc = docs[index];
+                final doc = visibleDocs[index];
                 final data = doc.data() as Map<String, dynamic>;
+                // Validate post data before rendering
+                if (data['content'] == null ||
+                    data['content'].toString().isEmpty) {
+                  return const SizedBox.shrink(); // Skip invalid posts
+                }
                 return _PostTile(data: {...data, 'id': doc.id});
               },
             );
@@ -523,18 +570,31 @@ class _WorldFeed extends StatelessWidget {
           .limit(50)
           .snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(child: Text('Error loading posts: ${snapshot.error}'));
+        }
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
         final docs = snapshot.data!.docs.toList()..shuffle();
-        if (docs.isEmpty) {
+        // Filter out hidden posts and posts from deactivated users
+        final visibleDocs = docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return data['isHidden'] != true && data['ownerActive'] != false;
+        }).toList();
+
+        if (visibleDocs.isEmpty) {
           return const Center(child: Text('No posts yet'));
         }
         return ListView.builder(
-          itemCount: docs.length,
+          itemCount: visibleDocs.length,
           itemBuilder: (context, index) {
-            final doc = docs[index];
+            final doc = visibleDocs[index];
             final data = doc.data() as Map<String, dynamic>;
+            // Validate post data before rendering
+            if (data['content'] == null || data['content'].toString().isEmpty) {
+              return const SizedBox.shrink(); // Skip invalid posts
+            }
             return _PostTile(data: {...data, 'id': doc.id});
           },
         );
@@ -556,18 +616,31 @@ class _AnonymousFeed extends StatelessWidget {
           .limit(50)
           .snapshots(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(child: Text('Error loading posts: ${snapshot.error}'));
+        }
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
         final docs = snapshot.data!.docs;
-        if (docs.isEmpty) {
+        // Filter out hidden posts and posts from deactivated users
+        final visibleDocs = docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return data['isHidden'] != true && data['ownerActive'] != false;
+        }).toList();
+
+        if (visibleDocs.isEmpty) {
           return const Center(child: Text('No anonymous posts yet'));
         }
         return ListView.builder(
-          itemCount: docs.length,
+          itemCount: visibleDocs.length,
           itemBuilder: (context, index) {
-            final doc = docs[index];
+            final doc = visibleDocs[index];
             final data = doc.data() as Map<String, dynamic>;
+            // Validate post data before rendering
+            if (data['content'] == null || data['content'].toString().isEmpty) {
+              return const SizedBox.shrink(); // Skip invalid posts
+            }
             return _PostTile(data: {...data, 'id': doc.id});
           },
         );
@@ -582,6 +655,11 @@ class _PostTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Validate that we have essential post data
+    if (data['content'] == null || data['content'].toString().isEmpty) {
+      return const SizedBox.shrink(); // Don't render invalid posts
+    }
+
     final isAnonymous = (data['visibility'] ?? 'public') == 'anonymous';
     final postType = (data['postType'] ?? 'prayer') as String;
     final ownerId = (data['ownerId'] ?? '') as String;
@@ -628,6 +706,19 @@ class _PostTile extends StatelessWidget {
                         .doc(ownerId)
                         .get(),
                     builder: (context, snap) {
+                      // Handle error case - if user doesn't exist, show fallback
+                      if (snap.hasError) {
+                        return _buildUserRow(
+                          context: context,
+                          name: ownerNameInline.isNotEmpty
+                              ? ownerNameInline
+                              : 'User',
+                          handle: ownerHandleInline,
+                          photo: '',
+                          ownerId: ownerId,
+                        );
+                      }
+
                       final name = snap.hasData && snap.data!.exists
                           ? ((snap.data!.data()
                                         as Map<String, dynamic>)['name'] ??
@@ -648,46 +739,13 @@ class _PostTile extends StatelessWidget {
                                     '')
                                 as String
                           : '';
-                      return InkWell(
-                        onTap: () {
-                          if (ownerId.isNotEmpty) {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    UserProfilePage(userId: ownerId),
-                              ),
-                            );
-                          }
-                        },
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 12,
-                              backgroundImage: photo.isNotEmpty
-                                  ? NetworkImage(photo)
-                                  : null,
-                              child: photo.isEmpty
-                                  ? const Icon(Icons.person, size: 14)
-                                  : null,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (handle.isNotEmpty) ...[
-                              const SizedBox(width: 6),
-                              Text(
-                                '@$handle',
-                                style: const TextStyle(color: Colors.grey),
-                              ),
-                            ],
-                            const Spacer(),
-                            _FriendAction(ownerId: ownerId),
-                          ],
-                        ),
+
+                      return _buildUserRow(
+                        context: context,
+                        name: name,
+                        handle: handle,
+                        photo: photo,
+                        ownerId: ownerId,
                       );
                     },
                   );
@@ -782,6 +840,41 @@ class _PostTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildUserRow({
+    required BuildContext context,
+    required String name,
+    required String handle,
+    required String photo,
+    required String ownerId,
+  }) {
+    return InkWell(
+      onTap: () {
+        if (ownerId.isNotEmpty) {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => UserProfilePage(userId: ownerId)),
+          );
+        }
+      },
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 12,
+            backgroundImage: photo.isNotEmpty ? NetworkImage(photo) : null,
+            child: photo.isEmpty ? const Icon(Icons.person, size: 14) : null,
+          ),
+          const SizedBox(width: 8),
+          Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
+          if (handle.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Text('@$handle', style: const TextStyle(color: Colors.grey)),
+          ],
+          const Spacer(),
+          _FriendAction(ownerId: ownerId),
+        ],
       ),
     );
   }

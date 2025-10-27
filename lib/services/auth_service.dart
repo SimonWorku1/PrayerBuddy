@@ -379,14 +379,157 @@ class AuthService {
   // Handle account deactivation
   Future<void> handleAccountDeactivation(String userId) async {
     try {
-      // Update user document to set isDeactivated to true
-      await FirebaseFirestore.instance.collection('users').doc(userId).update({
+      final db = FirebaseFirestore.instance;
+      // Mark user as deactivated
+      await db.collection('users').doc(userId).set({
         'isDeactivated': true,
-      });
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Hide posts (ownerActive=false, isHidden=true)
+      QuerySnapshot posts;
+      do {
+        posts = await db
+            .collection('posts')
+            .where('ownerId', isEqualTo: userId)
+            .limit(400)
+            .get();
+        final batch = db.batch();
+        for (final d in posts.docs) {
+          batch.set(d.reference, {
+            'ownerActive': false,
+            'isHidden': true,
+          }, SetOptions(merge: true));
+        }
+        if (posts.docs.isNotEmpty) {
+          await batch.commit();
+        }
+      } while (posts.docs.isNotEmpty);
+
+      // Hide chats that involve this user
+      QuerySnapshot chats;
+      do {
+        chats = await db
+            .collection('chats')
+            .where('memberIds', arrayContains: userId)
+            .limit(400)
+            .get();
+        final batch = db.batch();
+        for (final d in chats.docs) {
+          batch.set(d.reference, {'isHidden': true}, SetOptions(merge: true));
+        }
+        if (chats.docs.isNotEmpty) await batch.commit();
+      } while (chats.docs.isNotEmpty);
+
+      // Hide friend requests (from or to this user)
+      for (final field in ['from', 'to']) {
+        QuerySnapshot reqs;
+        do {
+          reqs = await db
+              .collection('friend_requests')
+              .where(field, isEqualTo: userId)
+              .limit(400)
+              .get();
+          final batch = db.batch();
+          for (final d in reqs.docs) {
+            batch.set(d.reference, {'isHidden': true}, SetOptions(merge: true));
+          }
+          if (reqs.docs.isNotEmpty) await batch.commit();
+        } while (reqs.docs.isNotEmpty);
+      }
+
+      // Hide handle (keep reserved)
+      final userDoc = await db.collection('users').doc(userId).get();
+      final handle = userDoc.data() != null
+          ? (userDoc.data()!['handle'] ?? '')
+          : '';
+      if (handle is String && handle.isNotEmpty) {
+        await db.collection('handles').doc(handle).set({
+          'isHidden': true,
+        }, SetOptions(merge: true));
+      }
 
       print('Account deactivation handled successfully for user: $userId');
     } catch (e) {
       print('Error handling account deactivation: $e');
+    }
+  }
+
+  // Reactivate account and unhide content
+  Future<void> handleAccountReactivation(String userId) async {
+    try {
+      final db = FirebaseFirestore.instance;
+      await db.collection('users').doc(userId).set({
+        'isDeactivated': false,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      // Unhide posts
+      QuerySnapshot posts;
+      do {
+        posts = await db
+            .collection('posts')
+            .where('ownerId', isEqualTo: userId)
+            .limit(400)
+            .get();
+        final batch = db.batch();
+        for (final d in posts.docs) {
+          batch.set(d.reference, {
+            'ownerActive': true,
+            'isHidden': false,
+          }, SetOptions(merge: true));
+        }
+        if (posts.docs.isNotEmpty) await batch.commit();
+      } while (posts.docs.isNotEmpty);
+
+      // Unhide chats
+      QuerySnapshot chats;
+      do {
+        chats = await db
+            .collection('chats')
+            .where('memberIds', arrayContains: userId)
+            .limit(400)
+            .get();
+        final batch = db.batch();
+        for (final d in chats.docs) {
+          batch.set(d.reference, {'isHidden': false}, SetOptions(merge: true));
+        }
+        if (chats.docs.isNotEmpty) await batch.commit();
+      } while (chats.docs.isNotEmpty);
+
+      // Unhide friend requests
+      for (final field in ['from', 'to']) {
+        QuerySnapshot reqs;
+        do {
+          reqs = await db
+              .collection('friend_requests')
+              .where(field, isEqualTo: userId)
+              .limit(400)
+              .get();
+          final batch = db.batch();
+          for (final d in reqs.docs) {
+            batch.set(d.reference, {
+              'isHidden': false,
+            }, SetOptions(merge: true));
+          }
+          if (reqs.docs.isNotEmpty) await batch.commit();
+        } while (reqs.docs.isNotEmpty);
+      }
+
+      // Unhide handle
+      final userDoc = await db.collection('users').doc(userId).get();
+      final handle = userDoc.data() != null
+          ? (userDoc.data()!['handle'] ?? '')
+          : '';
+      if (handle is String && handle.isNotEmpty) {
+        await db.collection('handles').doc(handle).set({
+          'isHidden': false,
+        }, SetOptions(merge: true));
+      }
+
+      print('Account reactivation handled successfully for user: $userId');
+    } catch (e) {
+      print('Error handling account reactivation: $e');
     }
   }
 
@@ -411,6 +554,78 @@ class AuthService {
       }
     } catch (e) {
       print('Error deleting unauthenticated accounts: $e');
+    }
+  }
+
+  // Cascade delete user content and auth
+  Future<void> deleteAccountCascade(User user) async {
+    final uid = user.uid;
+    final db = FirebaseFirestore.instance;
+    try {
+      // Delete posts
+      QuerySnapshot posts;
+      do {
+        posts = await db
+            .collection('posts')
+            .where('ownerId', isEqualTo: uid)
+            .limit(400)
+            .get();
+        final batch = db.batch();
+        for (final d in posts.docs) {
+          batch.delete(d.reference);
+        }
+        if (posts.docs.isNotEmpty) await batch.commit();
+      } while (posts.docs.isNotEmpty);
+
+      // Delete chats where the user is a member
+      QuerySnapshot chats;
+      do {
+        chats = await db
+            .collection('chats')
+            .where('memberIds', arrayContains: uid)
+            .limit(400)
+            .get();
+        final batch = db.batch();
+        for (final d in chats.docs) {
+          batch.delete(d.reference);
+        }
+        if (chats.docs.isNotEmpty) await batch.commit();
+      } while (chats.docs.isNotEmpty);
+
+      // Delete friend requests sent or received
+      for (final field in ['from', 'to']) {
+        QuerySnapshot reqs;
+        do {
+          reqs = await db
+              .collection('friend_requests')
+              .where(field, isEqualTo: uid)
+              .limit(400)
+              .get();
+          final batch = db.batch();
+          for (final d in reqs.docs) {
+            batch.delete(d.reference);
+          }
+          if (reqs.docs.isNotEmpty) await batch.commit();
+        } while (reqs.docs.isNotEmpty);
+      }
+
+      // Release handle
+      final userDoc = await db.collection('users').doc(uid).get();
+      final handle = userDoc.data() != null
+          ? (userDoc.data()!['handle'] ?? '')
+          : '';
+      if (handle is String && handle.isNotEmpty) {
+        await db.collection('handles').doc(handle).delete().catchError((_) {});
+      }
+
+      // Delete user profile
+      await db.collection('users').doc(uid).delete().catchError((_) {});
+
+      // Delete auth account
+      await user.delete();
+    } catch (e) {
+      print('Error deleting account cascade: $e');
+      rethrow;
     }
   }
 
