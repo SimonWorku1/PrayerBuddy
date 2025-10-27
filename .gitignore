@@ -49,3 +49,8 @@ web/.dart_tool/
 # Misc
 *.log
 .DS_Store
+
+# Local env (keep secrets out of git)
+.env
+functions/.env
+functions/.env.*
